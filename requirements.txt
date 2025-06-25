@@ -3,3 +3,5 @@ docxtpl>=0.16.7
 num2words>=0.5.12
 python-docx>=0.8.11
 docx2pdf>=0.1.8
+jinja2>=3.1.2
+markupsafe>=2.1.1
