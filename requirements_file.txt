@@ -1,3 +1,5 @@
-streamlit==1.28.0
-python-docx-template==0.16.7
-num2words==0.5.12
+streamlit>=1.28.0
+docxtpl>=0.16.7
+num2words>=0.5.12
+python-docx>=0.8.11
+# docx2pdf>=0.1.8  # Закомментируйте эту строку
