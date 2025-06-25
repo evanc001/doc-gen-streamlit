@@ -1,0 +1,3 @@
+streamlit==1.28.0
+python-docx-template==0.16.7
+num2words==0.5.12
