@@ -390,7 +390,7 @@ def streamlit_app():
     # Поле ввода с новым placeholder
     input_data = st.text_input(
         "Введите данные:",
-        placeholder="",
+        placeholder="номер допика,компания,продукт,цена,количество,дата оплаты",
         help="Введите данные через запятую в указанном порядке"
     )
     
@@ -409,7 +409,6 @@ def streamlit_app():
             # Парсим входные данные
             parts = [p.strip() for p in input_data.split(',')]
             if len(parts) != 6:
-                st.error(f"❌ Неверное количество полей. Ожидается 6, а получено {len(parts)}.\nПравильный формат: номер дc,компания,продукт,цена,количество,дата оплаты")
                 return
             
             dop_num, client_key, product_key, price_str, tons_str, pay_date = parts
@@ -517,7 +516,6 @@ def console_app():
     
     print("\n" + "=" * 60)
     print("📝 ВВОД ДАННЫХ")
-    print("Формат: номер дc,компания,продукт,цена,способ передачи,количество,дата оплаты,базис")
     print("Пример: 212,деко,дтл,63000,самовывоз,21,20.07.2025,танеко")
     print("=" * 60)
     
@@ -608,4 +606,13 @@ def create_sample_json_files():
     with open(os.path.join(json_dir, "clients.json"), 'w', encoding='utf-8') as f:
         json.dump(sample_clients, f, ensure_ascii=False, indent=2)
     
-    with open(os.path.join(json_dir, "products.json"), 'w', encoding='utf-8
+    with open(os.path.join(json_dir, "products.json"), 'w', encoding='utf-8') as f:
+        json.dump(sample_products, f, ensure_ascii=False, indent=2)
+    
+    with open(os.path.join(json_dir, "locations.json"), 'w', encoding='utf-8') as f:
+        json.dump(sample_locations, f, ensure_ascii=False, indent=2)
+
+# Создаем примеры JSON файлов при первом запуске
+if __name__ == "__main__" and not os.path.exists(os.path.join(os.path.dirname(__file__), "json")):
+    create_sample_json_files()
+    print("📁 Созданы примеры JSON файлов в папке 'json'")
