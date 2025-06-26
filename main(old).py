@@ -54,141 +54,16 @@ MONTHS_PREPOSITIONAL = {
 
 # --- 2. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
 
-def generate_document_new(dop_num, client_key, product_key, price_str, tons_str, pay_date, 
-                         delivery_method, pickup_location=None, delivery_address=None, document_type="prepayment"):
+def generate_document(input_string, document_type="prepayment"):
     """
-    Генерирует документ Word на основе отдельных параметров.
+    Генерирует документ Word на основе строки ввода и типа документа.
     
     Args:
-        dop_num (str): Номер дополнительного соглашения
-        client_key (str): Ключ клиента
-        product_key (str): Ключ продукта
-        price_str (str): Цена
-        tons_str (str): Количество тонн
-        pay_date (str): Дата оплаты
-        delivery_method (str): "самовывоз" или "доставка"
-        pickup_location (str): Локация для самовывоза (если выбран самовывоз)
-        delivery_address (str): Адрес доставки (если выбрана доставка)
+        input_string (str): Строка с данными через запятую
         document_type (str): "prepayment" или "deferment_pay"
     
     Returns:
         tuple: (docx_path, pdf_path, error_message)
-    """
-    try:
-        # Загружаем словари
-        clients, products, locations = load_dictionaries()
-        
-        # Определяем шаблон
-        template_filename = f"{document_type}.docx"
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        template_path = os.path.join(base_path, template_filename)
-        
-        if not os.path.exists(template_path):
-            return None, None, f"Ошибка: Шаблон '{template_filename}' не найден. Убедитесь, что он находится в корневой папке скрипта."
-
-        # Проверяем данные в словарях
-        client_data = clients.get(client_key.lower())
-        product_name = products.get(product_key.lower())
-        
-        errors = []
-        if not client_data: errors.append(f"клиент '{client_key}'")
-        if not product_name: errors.append(f"товар '{product_key}'")
-        
-        # Определяем базис и адрес в зависимости от способа доставки
-        if delivery_method == "самовывоз":
-            if not pickup_location:
-                errors.append("не выбрана локация для самовывоза")
-            else:
-                location_full = locations.get(pickup_location.lower())
-                if not location_full:
-                    errors.append(f"адрес '{pickup_location}'")
-                basis_full = BASISES["самовывоз"]
-        else:  # доставка
-            if not delivery_address or not delivery_address.strip():
-                errors.append("не указан адрес доставки")
-            else:
-                location_full = delivery_address.strip()
-                basis_full = BASISES["доставка"]
-        
-        if errors:
-            return None, None, f"Ошибка: не найдены данные в словарях для: {', '.join(errors)}.\nПроверьте правильность написания и наличие данных в JSON файлах."
-
-        # Конвертируем числовые значения
-        try:
-            tons = int(tons_str)
-            price = int(price_str)
-        except ValueError:
-            return None, None, f"Ошибка: количество тонн ('{tons_str}') и цена ('{price_str}') должны быть целыми числами."
-        
-        # Формируем дату создания документа
-        now = datetime.now()
-        current_date_month = MONTHS_GENITIVE[now.month]
-        current_date = f"«{now.day}» {current_date_month} {now.year}г."
-        
-        # Формируем месяц и год поставки
-        try:
-            pay_date_obj = datetime.strptime(pay_date, '%d.%m.%Y')
-        except ValueError:
-            return None, None, f"Ошибка: неверный формат даты '{pay_date}'. Используйте формат ДД.ММ.ГГГГ (например, 20.07.2025)."
-        
-        delivery_month_name = MONTHS_PREPOSITIONAL[pay_date_obj.month]
-        delivery_month_year = f"в {delivery_month_name} {pay_date_obj.year} г."
-        
-        # Формируем контекст для шаблона
-        context = {
-            'dop_num': dop_num,
-            'contract': client_data['contract'],
-            'current_date': current_date,
-            'company_name': client_data['company_name'],
-            'director_position': client_data['director_position'],
-            'director_fio': client_data['director_fio'],
-            'delivery_month_year': delivery_month_year,
-            'product_name': product_name,
-            'tons_full': f"{tons} ({num2words(tons, lang='ru')})",
-            'price_full': f"{price:,} ({num2words(price, lang='ru')})".replace(',', ' '),
-            'basis_full': basis_full,
-            'location_full': location_full,
-            'pay_date': pay_date,
-            'initials': client_data['initials'],
-        }
-
-        # Генерируем документ
-        doc = DocxTemplate(template_path)
-        doc.render(context)
-        
-        # Создаем папку для сохранения
-        output_dir = os.path.join(base_path, "new_doc")
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Определяем имена файлов
-        doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        base_filename = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
-        
-        docx_filename = f"{base_filename}.docx"
-        pdf_filename = f"{base_filename}.pdf"
-        
-        docx_path = os.path.join(output_dir, docx_filename)
-        pdf_path = os.path.join(output_dir, pdf_filename)
-        
-        # Сохраняем DOCX
-        doc.save(docx_path)
-        
-        # Конвертируем в PDF
-        try:
-            convert(docx_path, pdf_path)
-        except Exception as e:
-            print(f"Предупреждение: Не удалось создать PDF файл: {e}")
-            return docx_path, None, None
-        
-        return docx_path, pdf_path, None
-
-    except Exception as e:
-        return None, None, f"Неизвестная ошибка: {e}"
-
-def generate_document(input_string, document_type="prepayment"):
-    """
-    Генерирует документ Word на основе строки ввода и типа документа.
-    Оставлена для совместимости с консольным интерфейсом.
     """
     try:
         # Загружаем словари
@@ -321,9 +196,13 @@ def streamlit_app():
                 st.text(f"• {key}")
         
         if locations:
-            st.subheader("Доступные базисы:")
+            st.subheader("Доступные адреса:")
             for key in sorted(locations.keys()):
                 st.text(f"• {key}")
+        
+        st.subheader("Способы передачи:")
+        st.text("• самовывоз")
+        st.text("• доставка")
     
     # Основной интерфейс
     col1, col2 = st.columns([2, 1])
@@ -343,90 +222,29 @@ def streamlit_app():
     
     st.markdown("---")
     
-    # Выбор способа доставки
-    st.subheader("🚚 Способ доставки")
-    delivery_method = st.radio(
-        "Выберите способ доставки:",
-        options=["самовывоз", "доставка"],
-        format_func=lambda x: "Самовывоз" if x == "самовывоз" else "Доставка",
-        horizontal=True
-    )
-    
-    # Поля в зависимости от способа доставки
-    pickup_location = None
-    delivery_address = None
-    
-    if delivery_method == "самовывоз":
-        st.subheader("📍 Базис для самовывоза")
-        if locations:
-            pickup_location = st.selectbox(
-                "Выберите базис:",
-                options=list(locations.keys()),
-                format_func=lambda x: x.upper()
-            )
-        else:
-            st.error("❌ Не найдены доступные базисы в файле locations.json")
-    else:  # доставка
-        st.subheader("📍 Адрес доставки")
-        delivery_address = st.text_input(
-            "Введите полный адрес доставки:",
-            placeholder="Например: г. Казань, ул. Сибгата Хакима, 51",
-            help="Укажите полный адрес, включая город, улицу и номер дома"
-        )
-    
-    st.markdown("---")
-    
     # Форма ввода данных
-    st.subheader("📝 Ввод основных данных")
+    st.subheader("📝 Ввод данных")
     
-    # Показываем подсказку о новом формате ввода
+    # Показываем подсказку о формате ввода
     st.markdown("""
-    **Новый формат ввода данных через запятую:**
-    `номер допика, компания, продукт, цена, количество, дата оплаты`
+    **Формат ввода данных через запятую:**
+    `номер допика, компания, продукт, цена, способ передачи, количество, дата оплаты, базис`
     
-    **Пример:** `212, деко, дтл, 63000, 21, 20.07.2025`
+    **Пример:** `212, деко, дтл, 63000, самовывоз, 21, 20.07.2025, танеко`
     """)
     
-    # Поле ввода с новым placeholder
+    # Поле ввода с placeholder
     input_data = st.text_input(
         "Введите данные:",
-        placeholder="",
-        help="Введите данные через запятую в указанном порядке"
+        placeholder="номер допика,компания,продукт,цена,способ передачи,количество,дата оплаты,базис",
+        help="Введите все данные через запятую в указанном порядке"
     )
     
     # Кнопка генерации
     if st.button("🚀 Сгенерировать документы", type="primary"):
         if input_data:
-            # Проверяем дополнительные поля
-            if delivery_method == "доставка" and (not delivery_address or not delivery_address.strip()):
-                st.error("❌ Пожалуйста, укажите адрес доставки")
-                return
-            
-            if delivery_method == "самовывоз" and not pickup_location:
-                st.error("❌ Пожалуйста, выберите базис для самовывоза")
-                return
-            
-            # Парсим входные данные
-            parts = [p.strip() for p in input_data.split(',')]
-            if len(parts) != 6:
-                st.error(f"❌ Неверное количество полей. Ожидается 6, а получено {len(parts)}.\nПравильный формат: номер дc,компания,продукт,цена,количество,дата оплаты")
-                return
-            
-            dop_num, client_key, product_key, price_str, tons_str, pay_date = parts
-            
             with st.spinner("Генерация документов..."):
-                docx_path, pdf_path, error = generate_document_new(
-                    dop_num=dop_num,
-                    client_key=client_key,
-                    product_key=product_key,
-                    price_str=price_str,
-                    tons_str=tons_str,
-                    pay_date=pay_date,
-                    delivery_method=delivery_method,
-                    pickup_location=pickup_location,
-                    delivery_address=delivery_address,
-                    document_type=document_type
-                )
+                docx_path, pdf_path, error = generate_document(input_data, document_type)
                 
                 if error:
                     st.error(f"❌ {error}")
@@ -456,13 +274,8 @@ def streamlit_app():
                                     mime="application/pdf"
                                 )
                     
-                    # Показываем информацию о созданном документе
+                    # Показываем пути сохранения
                     st.info(f"📁 Файлы сохранены в: {os.path.dirname(docx_path)}")
-                    st.info(f"🚚 Способ доставки: {delivery_method}")
-                    if delivery_method == "самовывоз":
-                        st.info(f"📍 Базис: {pickup_location}")
-                    else:
-                        st.info(f"📍 Адрес доставки: {delivery_address}")
         else:
             st.warning("⚠️ Пожалуйста, введите данные для генерации документа.")
 
@@ -517,7 +330,7 @@ def console_app():
     
     print("\n" + "=" * 60)
     print("📝 ВВОД ДАННЫХ")
-    print("Формат: номер дc,компания,продукт,цена,способ передачи,количество,дата оплаты,базис")
+    print("Формат: номер допика,компания,продукт,цена,способ передачи,количество,дата оплаты,базис")
     print("Пример: 212,деко,дтл,63000,самовывоз,21,20.07.2025,танеко")
     print("=" * 60)
     
@@ -608,4 +421,13 @@ def create_sample_json_files():
     with open(os.path.join(json_dir, "clients.json"), 'w', encoding='utf-8') as f:
         json.dump(sample_clients, f, ensure_ascii=False, indent=2)
     
-    with open(os.path.join(json_dir, "products.json"), 'w', encoding='utf-8
+    with open(os.path.join(json_dir, "products.json"), 'w', encoding='utf-8') as f:
+        json.dump(sample_products, f, ensure_ascii=False, indent=2)
+    
+    with open(os.path.join(json_dir, "locations.json"), 'w', encoding='utf-8') as f:
+        json.dump(sample_locations, f, ensure_ascii=False, indent=2)
+
+# Создаем примеры JSON файлов при первом запуске
+if __name__ == "__main__" and not os.path.exists(os.path.join(os.path.dirname(__file__), "json")):
+    create_sample_json_files()
+    print("📁 Созданы примеры JSON файлов в папке 'json'")
