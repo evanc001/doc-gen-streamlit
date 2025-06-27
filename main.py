@@ -296,7 +296,7 @@ def generate_document(input_string, document_type="prepayment"):
         
         # Определяем имена файлов
         doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        base_filename = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
+        base_filename = f"Дополнительное соглашение №{dop_num} {client_key.upper()}_{doc_type_suffix}"
         
         docx_filename = f"{base_filename}.docx"
         pdf_filename = f"{base_filename}.pdf"
