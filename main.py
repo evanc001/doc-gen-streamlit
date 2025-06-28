@@ -2,7 +2,7 @@
 import os
 import json
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, date
 from docxtpl import DocxTemplate
 from num2words import num2words
 from docx2pdf import convert
@@ -53,7 +53,52 @@ MONTHS_PREPOSITIONAL = {
     7: 'июле', 8: 'августе', 9: 'сентябре', 10: 'октябре', 11: 'ноябре', 12: 'декабре'
 }
 
-# --- 2. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
+# --- 2. ФУНКЦИИ ДЛЯ РАБОТЫ С ИСТОРИЕЙ ---
+
+def load_history():
+    """Загружает историю документов"""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    history_path = os.path.join(base_path, "history.json")
+    
+    try:
+        with open(history_path, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+            # Сортируем по дате (новые первыми)
+            return sorted(history, key=lambda x: x['created_date'], reverse=True)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_to_history(params):
+    """Сохраняет параметры документа в историю"""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    history_path = os.path.join(base_path, "history.json")
+    
+    # Загружаем существующую историю
+    history = load_history()
+    
+    # Добавляем новую запись
+    history_entry = {
+        'created_date': datetime.now().isoformat(),
+        'display_date': datetime.now().strftime('%d.%m'),
+        'company': params['client_key'].upper(),
+        'dop_num': params['dop_num'],
+        'params': params  # Сохраняем все параметры
+    }
+    
+    # Добавляем в начало списка
+    history.insert(0, history_entry)
+    
+    # Оставляем только последние 20 записей
+    history = history[:20]
+    
+    # Сохраняем обновленную историю
+    try:
+        with open(history_path, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Ошибка при сохранении истории: {e}")
+
+# --- 3. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
 
 def generate_document_new(dop_num, client_key, product_key, price_str, tons_str, pay_date, 
                          delivery_method, pickup_location=None, delivery_address=None, document_type="prepayment"):
@@ -171,43 +216,12 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         docx_data = docx_buffer.getvalue()
         docx_buffer.close()
         
-        # Создаем временный файл для конвертации в PDF
-        pdf_data = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
-                temp_docx.write(docx_data)
-                temp_docx_path = temp_docx.name
-            
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
-                temp_pdf_path = temp_pdf.name
-            
-            # Конвертируем в PDF
-            convert(temp_docx_path, temp_pdf_path)
-            
-            # Читаем PDF данные
-            with open(temp_pdf_path, 'rb') as pdf_file:
-                pdf_data = pdf_file.read()
-            
-            # Удаляем временные файлы
-            os.unlink(temp_docx_path)
-            os.unlink(temp_pdf_path)
-            
-        except Exception as e:
-            print(f"Предупреждение: Не удалось создать PDF файл: {e}")
-            # Очищаем временные файлы в случае ошибки
-            try:
-                if 'temp_docx_path' in locals():
-                    os.unlink(temp_docx_path)
-                if 'temp_pdf_path' in locals():
-                    os.unlink(temp_pdf_path)
-            except:
-                pass
-        
-        return docx_data, pdf_data, filename_base, None
+        return docx_data, None, filename_base, None
 
     except Exception as e:
         return None, None, None, f"Неизвестная ошибка: {e}"
 
+# Оставляем оригинальную функцию для консольного интерфейса
 def generate_document(input_string, document_type="prepayment"):
     """
     Генерирует документ Word на основе строки ввода и типа документа.
@@ -319,7 +333,7 @@ def generate_document(input_string, document_type="prepayment"):
     except Exception as e:
         return None, None, f"Неизвестная ошибка: {e}"
 
-# --- 3. STREAMLIT ИНТЕРФЕЙС ---
+# --- 4. STREAMLIT ИНТЕРФЕЙС ---
 
 def streamlit_app():
     """Создает интерфейс Streamlit для генерации документов"""
@@ -329,7 +343,11 @@ def streamlit_app():
     # Загружаем словари для отображения доступных опций
     clients, products, locations = load_dictionaries()
     
-    # Боковая панель с информацией
+    # Инициализация состояния сессии для хранения параметров
+    if 'form_params' not in st.session_state:
+        st.session_state.form_params = {}
+    
+    # Боковая панель с информацией и историей
     with st.sidebar:
         st.header("📋 Справочная информация")
         
@@ -347,6 +365,29 @@ def streamlit_app():
             st.subheader("Доступные базисы:")
             for key in sorted(locations.keys()):
                 st.text(f"• {key}")
+        
+        st.markdown("---")
+        
+        # История документов
+        st.header("📚 История документов")
+        history = load_history()
+        
+        if history:
+            st.markdown("*Нажмите на запись для восстановления параметров*")
+            
+            # Создаем прокручиваемый список
+            for i, entry in enumerate(history):
+                # Формируем строку для отображения
+                display_text = f"{entry['display_date']} {entry['company']}, {entry['dop_num']}"
+                
+                # Создаем кнопку для каждой записи
+                if st.button(display_text, key=f"history_{i}", use_container_width=True):
+                    # Восстанавливаем параметры из истории
+                    params = entry['params']
+                    st.session_state.form_params = params
+                    st.rerun()
+        else:
+            st.text("История пуста")
     
     # Основной интерфейс
     st.subheader("🎯 Выбор типа документа")
@@ -358,14 +399,22 @@ def streamlit_app():
             "Тип оплаты:",
             options=["prepayment", "deferment_pay"],
             format_func=lambda x: "Предоплата" if x == "prepayment" else "Отсрочка платежа",
-            horizontal=True
+            horizontal=True,
+            index=0 if st.session_state.form_params.get('document_type', 'prepayment') == 'prepayment' else 1
         )
     
     with col2:
         # Поле для ввода даты оплаты с календарем
+        default_date = datetime.now().date()
+        if 'pay_date' in st.session_state.form_params:
+            try:
+                default_date = datetime.strptime(st.session_state.form_params['pay_date'], '%Y-%m-%d').date()
+            except:
+                pass
+        
         pay_date = st.date_input(
             "Дата оплаты:",
-            value=datetime.now().date(),
+            value=default_date,
             help="Выберите дату оплаты"
         )
     
@@ -373,11 +422,13 @@ def streamlit_app():
     
     # Выбор способа доставки
     st.subheader("🚚 Способ доставки")
+    default_delivery = st.session_state.form_params.get('delivery_method', 'самовывоз')
     delivery_method = st.radio(
         "Выберите способ доставки:",
         options=["самовывоз", "доставка"],
         format_func=lambda x: "Самовывоз" if x == "самовывоз" else "Доставка",
-        horizontal=True
+        horizontal=True,
+        index=0 if default_delivery == 'самовывоз' else 1
     )
     
     # Поля в зависимости от способа доставки
@@ -387,10 +438,15 @@ def streamlit_app():
     if delivery_method == "самовывоз":
         st.subheader("📍 Базис для самовывоза")
         if locations:
+            default_location = st.session_state.form_params.get('pickup_location', list(locations.keys())[0])
+            if default_location not in locations.keys():
+                default_location = list(locations.keys())[0]
+            
             pickup_location = st.selectbox(
                 "Выберите базис:",
                 options=list(locations.keys()),
-                format_func=lambda x: x.upper()
+                format_func=lambda x: x.upper(),
+                index=list(locations.keys()).index(default_location)
             )
         else:
             st.error("❌ Не найдены доступные базисы в файле locations.json")
@@ -399,7 +455,8 @@ def streamlit_app():
         delivery_address = st.text_input(
             "Введите полный адрес доставки:",
             placeholder="Например: г. Казань, ул. Абсалямова, 19",
-            help="Укажите полный адрес, включая город, улицу и номер дома"
+            help="Укажите полный адрес, включая город, улицу и номер дома",
+            value=st.session_state.form_params.get('delivery_address', '')
         )
     
     st.markdown("---")
@@ -411,31 +468,37 @@ def streamlit_app():
     col1, col2 = st.columns(2)
     
     with col1:
+        # Восстанавливаем данные компании
+        default_company_data = ""
+        if 'client_key' in st.session_state.form_params and 'dop_num' in st.session_state.form_params:
+            default_company_data = f"{st.session_state.form_params['client_key']},{st.session_state.form_params['dop_num']}"
+        
         company_data = st.text_input(
             "Компания, номер ДС:",
             placeholder="Например: Деко,212",
-            help="Формат: компания,номер_дс"
+            help="Формат: компания,номер_дс",
+            value=default_company_data
         )
     
     with col2:
+        # Восстанавливаем данные продукта
+        default_product_data = ""
+        if all(key in st.session_state.form_params for key in ['product_key', 'tons_str', 'price_str']):
+            default_product_data = f"{st.session_state.form_params['product_key']},{st.session_state.form_params['tons_str']},{st.session_state.form_params['price_str']}"
+        
         product_data = st.text_input(
             "Продукт, количество тонн, цена:",
             placeholder="Например: дтл,25,60500",
-            help="Формат: продукт,количество,цена"
+            help="Формат: продукт,количество,цена",
+            value=default_product_data
         )
     
-    # Кнопки генерации
+    # Кнопка генерации
     st.markdown("---")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        generate_docx = st.button("📄 Сгенерировать DOCX", type="primary", use_container_width=True)
-    
-    with col2:
-        generate_both = st.button("📄📑 Сгенерировать DOCX и PDF", type="primary", use_container_width=True)
+    generate_docx = st.button("📄 Сгенерировать DOCX", type="primary", use_container_width=True)
     
     # Обработка генерации
-    if generate_docx or generate_both:
+    if generate_docx:
         # Проверяем заполненность полей
         if not company_data or not product_data:
             st.error("❌ Пожалуйста, заполните все поля с данными")
@@ -470,7 +533,7 @@ def streamlit_app():
             st.error(f"❌ Ошибка при обработке данных: {e}")
             return
         
-        with st.spinner("Генерация документов..."):
+        with st.spinner("Генерация документа..."):
             docx_data, pdf_data, filename_base, error = generate_document_new(
                 dop_num=dop_num,
                 client_key=client_key,
@@ -487,36 +550,32 @@ def streamlit_app():
             if error:
                 st.error(f"❌ {error}")
             else:
-                st.success("✅ Документы успешно созданы!")
+                st.success("✅ Документ успешно создан!")
                 
-                # Определяем какие файлы создавать
-                show_docx = True
-                show_pdf = generate_both and pdf_data is not None
+                # Сохраняем в историю
+                history_params = {
+                    'dop_num': dop_num,
+                    'client_key': client_key,
+                    'product_key': product_key,
+                    'price_str': price_str,
+                    'tons_str': tons_str,
+                    'pay_date': pay_date.strftime('%Y-%m-%d'),
+                    'delivery_method': delivery_method,
+                    'pickup_location': pickup_location,
+                    'delivery_address': delivery_address,
+                    'document_type': document_type
+                }
+                save_to_history(history_params)
                 
-                if show_docx or show_pdf:
-                    download_col1, download_col2 = st.columns(2)
-                    
-                    # Кнопка скачивания DOCX
-                    if show_docx and docx_data:
-                        with download_col1:
-                            st.download_button(
-                                label="📄 Скачать DOCX",
-                                data=docx_data,
-                                file_name=f"{filename_base}.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                    
-                    # Кнопка скачивания PDF
-                    if show_pdf:
-                        with download_col2:
-                            st.download_button(
-                                label="📑 Скачать PDF",
-                                data=pdf_data,
-                                file_name=f"{filename_base}.pdf",
-                                mime="application/pdf"
-                            )
-                    elif generate_both and not pdf_data:
-                        st.warning("⚠️ PDF файл не удалось создать. Доступен только DOCX.")
+                # Кнопка скачивания DOCX
+                if docx_data:
+                    st.download_button(
+                        label="📄 Скачать DOCX",
+                        data=docx_data,
+                        file_name=f"{filename_base}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
                 
                 # Показываем информацию о созданном документе
                 st.info(f"🚚 Способ доставки: {delivery_method}")
@@ -526,7 +585,7 @@ def streamlit_app():
                     st.info(f"📍 Адрес доставки: {delivery_address}")
                 st.info(f"📅 Дата оплаты: {pay_date.strftime('%d.%m.%Y')}")
 
-# --- 4. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
+# --- 5. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
 
 def console_app():
     """Консольный интерфейс для генерации документов"""
