@@ -100,6 +100,9 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         if not product_name: errors.append(f"товар '{product_key}'")
         
         # Определяем базис и адрес в зависимости от способа доставки
+        location_display_name = ""
+        delivery_method_display = ""
+        
         if delivery_method == "самовывоз":
             if not pickup_location:
                 errors.append("не выбрана локация для самовывоза")
@@ -108,6 +111,8 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
                 if not location_full:
                     errors.append(f"адрес '{pickup_location}'")
                 basis_full = BASISES["самовывоз"]
+                location_display_name = pickup_location.capitalize()
+                delivery_method_display = "Самовывоз"
         elif delivery_method == "нефтебаза":
             if not neftebaza_location:
                 errors.append("не выбрана нефтебаза")
@@ -116,12 +121,16 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
                 if not location_full:
                     errors.append(f"нефтебаза '{neftebaza_location}'")
                 basis_full = BASISES["нефтебаза"]
+                location_display_name = "Нефтебаза"
+                delivery_method_display = "Нефтебаза"
         else:  # доставка
             if not delivery_address or not delivery_address.strip():
                 errors.append("не указан адрес доставки")
             else:
                 location_full = delivery_address.strip()
                 basis_full = BASISES["доставка"]
+                location_display_name = "Доставка"
+                delivery_method_display = "Доставка"
         
         if errors:
             return None, None, None, f"Ошибка: не найдены данные в словарях для: {', '.join(errors)}.\nПроверьте правильность написания и наличие данных в JSON файлах."
@@ -173,11 +182,16 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         doc = DocxTemplate(template_path)
         doc.render(context)
         
-        # Определяем имена файлов
-        doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        filename_base = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
+        # Формируем новое имя файла в требуемом формате
+        # Дополнительное соглашение №5 аи92 Танеко Самовывоз.doc
+        product_display = product_key.upper()
         
-        # Сохраняем DOCX в память
+        if delivery_method == "самовывоз":
+            filename_base = f"Дополнительное соглашение №{dop_num} {product_display} {location_display_name} {delivery_method_display}"
+        else:
+            filename_base = f"Дополнительное соглашение №{dop_num} {product_display} {delivery_method_display}"
+        
+        # Сохраняем DOCX в память (но меняем расширение в имени файла на .doc)
         docx_buffer = io.BytesIO()
         doc.save(docx_buffer)
         docx_data = docx_buffer.getvalue()
@@ -220,8 +234,13 @@ def generate_document(input_string, document_type="prepayment"):
         # Определяем локацию в зависимости от способа доставки
         if basis_key == "нефтебаза":
             location_full = neftebazy.get(location_key)
-        else:
+            location_display_name = "Нефтебаза"
+        elif basis_key == "доставка":
+            location_full = "Адрес доставки указан отдельно"  # Для консольного режима
+            location_display_name = "Доставка"
+        else:  # самовывоз
             location_full = locations.get(location_key)
+            location_display_name = location_key.capitalize()
         
         basis_full = BASISES.get(basis_key)
         
@@ -281,17 +300,24 @@ def generate_document(input_string, document_type="prepayment"):
         output_dir = os.path.join(base_path, "new_doc")
         os.makedirs(output_dir, exist_ok=True)
         
-        # Определяем имена файлов
-        doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        base_filename = f"Дополнительное соглашение №{dop_num} {client_key.upper()}_{doc_type_suffix}"
+        # Формируем новое имя файла в требуемом формате
+        product_display = product_key.upper()
         
-        docx_filename = f"{base_filename}.docx"
+        if basis_key == "самовывоз":
+            base_filename = f"Дополнительное соглашение №{dop_num} {product_display} {location_display_name} Самовывоз"
+        elif basis_key == "нефтебаза":
+            base_filename = f"Дополнительное соглашение №{dop_num} {product_display} Нефтебаза"
+        else:  # доставка
+            base_filename = f"Дополнительное соглашение №{dop_num} {product_display} Доставка"
+        
+        # Изменяем расширение на .doc
+        docx_filename = f"{base_filename}.doc"
         pdf_filename = f"{base_filename}.pdf"
         
         docx_path = os.path.join(output_dir, docx_filename)
         pdf_path = os.path.join(output_dir, pdf_filename)
         
-        # Сохраняем DOCX
+        # Сохраняем файл (фактически это будет docx, но с расширением .doc)
         doc.save(docx_path)
         
         # Конвертируем в PDF
@@ -433,7 +459,7 @@ def streamlit_app():
     
     # Кнопка генерации
     st.markdown("---")
-    generate_docx = st.button("📄 Сгенерировать DOCX", type="primary", use_container_width=True)
+    generate_docx = st.button("📄 Сгенерировать DOC", type="primary", use_container_width=True)
     
     # Обработка генерации
     if generate_docx:
@@ -495,13 +521,13 @@ def streamlit_app():
             else:
                 st.success("✅ Документ успешно создан!")
                 
-                # Кнопка скачивания DOCX
+                # Кнопка скачивания DOC (фактически docx, но с расширением .doc)
                 if docx_data:
                     st.download_button(
-                        label="📄 Скачать DOCX",
+                        label="📄 Скачать DOC",
                         data=docx_data,
-                        file_name=f"{filename_base}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        file_name=f"{filename_base}.doc",
+                        mime="application/msword",
                         use_container_width=True
                     )
                 
@@ -514,6 +540,7 @@ def streamlit_app():
                 else:
                     st.info(f"📍 Адрес доставки: {delivery_address}")
                 st.info(f"📅 Дата оплаты: {pay_date.strftime('%d.%m.%Y')}")
+                st.info(f"📁 Имя файла: {filename_base}.doc")
 
 # --- 4. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
 
