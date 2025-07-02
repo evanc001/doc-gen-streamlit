@@ -2,11 +2,12 @@
 import os
 import json
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, date
 from docxtpl import DocxTemplate
 from num2words import num2words
 from docx2pdf import convert
 import tempfile
+import io
 
 # --- 1. ЗАГРУЗКА СЛОВАРЕЙ ИЗ JSON ---
 
@@ -52,7 +53,52 @@ MONTHS_PREPOSITIONAL = {
     7: 'июле', 8: 'августе', 9: 'сентябре', 10: 'октябре', 11: 'ноябре', 12: 'декабре'
 }
 
-# --- 2. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
+# --- 2. ФУНКЦИИ ДЛЯ РАБОТЫ С ИСТОРИЕЙ ---
+
+def load_history():
+    """Загружает историю документов"""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    history_path = os.path.join(base_path, "history.json")
+    
+    try:
+        with open(history_path, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+            # Сортируем по дате (новые первыми)
+            return sorted(history, key=lambda x: x['created_date'], reverse=True)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_to_history(params):
+    """Сохраняет параметры документа в историю"""
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    history_path = os.path.join(base_path, "history.json")
+    
+    # Загружаем существующую историю
+    history = load_history()
+    
+    # Добавляем новую запись
+    history_entry = {
+        'created_date': datetime.now().isoformat(),
+        'display_date': datetime.now().strftime('%d.%m'),
+        'company': params['client_key'].upper(),
+        'dop_num': params['dop_num'],
+        'params': params  # Сохраняем все параметры
+    }
+    
+    # Добавляем в начало списка
+    history.insert(0, history_entry)
+    
+    # Оставляем только последние 20 записей
+    history = history[:20]
+    
+    # Сохраняем обновленную историю
+    try:
+        with open(history_path, 'w', encoding='utf-8') as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Ошибка при сохранении истории: {e}")
+
+# --- 3. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
 
 def generate_document_new(dop_num, client_key, product_key, price_str, tons_str, pay_date, 
                          delivery_method, pickup_location=None, delivery_address=None, document_type="prepayment"):
@@ -72,7 +118,7 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         document_type (str): "prepayment" или "deferment_pay"
     
     Returns:
-        tuple: (docx_path, pdf_path, error_message)
+        tuple: (docx_data, pdf_data, filename_base, error_message)
     """
     try:
         # Загружаем словари
@@ -84,7 +130,7 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         template_path = os.path.join(base_path, template_filename)
         
         if not os.path.exists(template_path):
-            return None, None, f"Ошибка: Шаблон '{template_filename}' не найден. Убедитесь, что он находится в корневой папке скрипта."
+            return None, None, None, f"Ошибка: Шаблон '{template_filename}' не найден. Убедитесь, что он находится в корневой папке скрипта."
 
         # Проверяем данные в словарях
         client_data = clients.get(client_key.lower())
@@ -111,14 +157,14 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
                 basis_full = BASISES["доставка"]
         
         if errors:
-            return None, None, f"Ошибка: не найдены данные в словарях для: {', '.join(errors)}.\nПроверьте правильность написания и наличие данных в JSON файлах."
+            return None, None, None, f"Ошибка: не найдены данные в словарях для: {', '.join(errors)}.\nПроверьте правильность написания и наличие данных в JSON файлах."
 
         # Конвертируем числовые значения
         try:
             tons = int(tons_str)
             price = int(price_str)
         except ValueError:
-            return None, None, f"Ошибка: количество тонн ('{tons_str}') и цена ('{price_str}') должны быть целыми числами."
+            return None, None, None, f"Ошибка: количество тонн ('{tons_str}') и цена ('{price_str}') должны быть целыми числами."
         
         # Формируем дату создания документа
         now = datetime.now()
@@ -127,9 +173,13 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         
         # Формируем месяц и год поставки
         try:
-            pay_date_obj = datetime.strptime(pay_date, '%d.%m.%Y')
+            if isinstance(pay_date, str):
+                pay_date_obj = datetime.strptime(pay_date, '%d.%m.%Y')
+            else:
+                pay_date_obj = pay_date
+                pay_date = pay_date_obj.strftime('%d.%m.%Y')
         except ValueError:
-            return None, None, f"Ошибка: неверный формат даты '{pay_date}'. Используйте формат ДД.ММ.ГГГГ (например, 20.07.2025)."
+            return None, None, None, f"Ошибка: неверный формат даты '{pay_date}'. Используйте формат ДД.ММ.ГГГГ (например, 20.07.2025)."
         
         delivery_month_name = MONTHS_PREPOSITIONAL[pay_date_obj.month]
         delivery_month_year = f"в {delivery_month_name} {pay_date_obj.year} г."
@@ -156,35 +206,22 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         doc = DocxTemplate(template_path)
         doc.render(context)
         
-        # Создаем папку для сохранения
-        output_dir = os.path.join(base_path, "new_doc")
-        os.makedirs(output_dir, exist_ok=True)
-        
         # Определяем имена файлов
         doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        base_filename = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
+        filename_base = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
         
-        docx_filename = f"{base_filename}.docx"
-        pdf_filename = f"{base_filename}.pdf"
+        # Сохраняем DOCX в память
+        docx_buffer = io.BytesIO()
+        doc.save(docx_buffer)
+        docx_data = docx_buffer.getvalue()
+        docx_buffer.close()
         
-        docx_path = os.path.join(output_dir, docx_filename)
-        pdf_path = os.path.join(output_dir, pdf_filename)
-        
-        # Сохраняем DOCX
-        doc.save(docx_path)
-        
-        # Конвертируем в PDF
-        try:
-            convert(docx_path, pdf_path)
-        except Exception as e:
-            print(f"Предупреждение: Не удалось создать PDF файл: {e}")
-            return docx_path, None, None
-        
-        return docx_path, pdf_path, None
+        return docx_data, None, filename_base, None
 
     except Exception as e:
-        return None, None, f"Неизвестная ошибка: {e}"
+        return None, None, None, f"Неизвестная ошибка: {e}"
 
+# Оставляем оригинальную функцию для консольного интерфейса
 def generate_document(input_string, document_type="prepayment"):
     """
     Генерирует документ Word на основе строки ввода и типа документа.
@@ -273,7 +310,7 @@ def generate_document(input_string, document_type="prepayment"):
         
         # Определяем имена файлов
         doc_type_suffix = "предоплата" if document_type == "prepayment" else "отсрочка"
-        base_filename = f"Доп.соглашение_{dop_num}_{client_key.upper()}_{doc_type_suffix}"
+        base_filename = f"Дополнительное соглашение №{dop_num} {client_key.upper()}_{doc_type_suffix}"
         
         docx_filename = f"{base_filename}.docx"
         pdf_filename = f"{base_filename}.pdf"
@@ -296,17 +333,21 @@ def generate_document(input_string, document_type="prepayment"):
     except Exception as e:
         return None, None, f"Неизвестная ошибка: {e}"
 
-# --- 3. STREAMLIT ИНТЕРФЕЙС ---
+# --- 4. STREAMLIT ИНТЕРФЕЙС ---
 
 def streamlit_app():
     """Создает интерфейс Streamlit для генерации документов"""
-    st.title("🔄 Генератор дополнительных соглашений")
+    st.markdown("<h2 style='text-align: center;'>🔄 Генератор дополнительных соглашений</h2>", unsafe_allow_html=True)
     st.markdown("---")
     
     # Загружаем словари для отображения доступных опций
     clients, products, locations = load_dictionaries()
     
-    # Боковая панель с информацией
+    # Инициализация состояния сессии для хранения параметров
+    if 'form_params' not in st.session_state:
+        st.session_state.form_params = {}
+    
+    # Боковая панель с информацией и историей
     with st.sidebar:
         st.header("📋 Справочная информация")
         
@@ -324,32 +365,70 @@ def streamlit_app():
             st.subheader("Доступные базисы:")
             for key in sorted(locations.keys()):
                 st.text(f"• {key}")
+        
+        st.markdown("---")
+        
+        # История документов
+        st.header("📚 История документов")
+        history = load_history()
+        
+        if history:
+            st.markdown("*Нажмите на запись для восстановления параметров*")
+            
+            # Создаем прокручиваемый список
+            for i, entry in enumerate(history):
+                # Формируем строку для отображения
+                display_text = f"{entry['display_date']} {entry['company']}, {entry['dop_num']}"
+                
+                # Создаем кнопку для каждой записи
+                if st.button(display_text, key=f"history_{i}", use_container_width=True):
+                    # Восстанавливаем параметры из истории
+                    params = entry['params']
+                    st.session_state.form_params = params
+                    st.rerun()
+        else:
+            st.text("История пуста")
     
     # Основной интерфейс
-    col1, col2 = st.columns([2, 1])
+    st.subheader("🎯 Выбор типа документа")
+    
+    col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("🎯 Выбор типа документа")
         document_type = st.radio(
             "Тип оплаты:",
             options=["prepayment", "deferment_pay"],
             format_func=lambda x: "Предоплата" if x == "prepayment" else "Отсрочка платежа",
-            horizontal=True
+            horizontal=True,
+            index=0 if st.session_state.form_params.get('document_type', 'prepayment') == 'prepayment' else 1
         )
     
     with col2:
-        st.subheader("💡 Подсказка")
-        st.info("Выберите тип документа в зависимости от условий оплаты.")
+        # Поле для ввода даты оплаты с календарем
+        default_date = datetime.now().date()
+        if 'pay_date' in st.session_state.form_params:
+            try:
+                default_date = datetime.strptime(st.session_state.form_params['pay_date'], '%Y-%m-%d').date()
+            except:
+                pass
+        
+        pay_date = st.date_input(
+            "Дата оплаты:",
+            value=default_date,
+            help="Выберите дату оплаты"
+        )
     
     st.markdown("---")
     
     # Выбор способа доставки
     st.subheader("🚚 Способ доставки")
+    default_delivery = st.session_state.form_params.get('delivery_method', 'самовывоз')
     delivery_method = st.radio(
         "Выберите способ доставки:",
         options=["самовывоз", "доставка"],
         format_func=lambda x: "Самовывоз" if x == "самовывоз" else "Доставка",
-        horizontal=True
+        horizontal=True,
+        index=0 if default_delivery == 'самовывоз' else 1
     )
     
     # Поля в зависимости от способа доставки
@@ -359,10 +438,15 @@ def streamlit_app():
     if delivery_method == "самовывоз":
         st.subheader("📍 Базис для самовывоза")
         if locations:
+            default_location = st.session_state.form_params.get('pickup_location', list(locations.keys())[0])
+            if default_location not in locations.keys():
+                default_location = list(locations.keys())[0]
+            
             pickup_location = st.selectbox(
                 "Выберите базис:",
                 options=list(locations.keys()),
-                format_func=lambda x: x.upper()
+                format_func=lambda x: x.upper(),
+                index=list(locations.keys()).index(default_location)
             )
         else:
             st.error("❌ Не найдены доступные базисы в файле locations.json")
@@ -371,7 +455,8 @@ def streamlit_app():
         delivery_address = st.text_input(
             "Введите полный адрес доставки:",
             placeholder="Например: г. Казань, ул. Абсалямова, 19",
-            help="Укажите полный адрес, включая город, улицу и номер дома"
+            help="Укажите полный адрес, включая город, улицу и номер дома",
+            value=st.session_state.form_params.get('delivery_address', '')
         )
     
     st.markdown("---")
@@ -379,94 +464,128 @@ def streamlit_app():
     # Форма ввода данных
     st.subheader("📝 Ввод основных данных")
     
-    # Показываем подсказку о новом формате ввода
-    st.markdown("""
-    **Новый формат ввода данных через запятую:**
-    `номер доп.соглашения, компания, продукт, цена, количество, дата оплаты`
+    # Два поля ввода
+    col1, col2 = st.columns(2)
     
-    **Пример:** `212, деко, дтл, 63000, 21, 20.07.2025`
-    """)
+    with col1:
+        # Восстанавливаем данные компании
+        default_company_data = ""
+        if 'client_key' in st.session_state.form_params and 'dop_num' in st.session_state.form_params:
+            default_company_data = f"{st.session_state.form_params['client_key']},{st.session_state.form_params['dop_num']}"
+        
+        company_data = st.text_input(
+            "Компания, номер ДС:",
+            placeholder="Например: Деко,212",
+            help="Формат: компания,номер_дс",
+            value=default_company_data
+        )
     
-    # Поле ввода с новым placeholder
-    input_data = st.text_input(
-        "Введите данные:",
-        placeholder="",
-        help="Введите данные через запятую в указанном порядке"
-    )
+    with col2:
+        # Восстанавливаем данные продукта
+        default_product_data = ""
+        if all(key in st.session_state.form_params for key in ['product_key', 'tons_str', 'price_str']):
+            default_product_data = f"{st.session_state.form_params['product_key']},{st.session_state.form_params['tons_str']},{st.session_state.form_params['price_str']}"
+        
+        product_data = st.text_input(
+            "Продукт, количество тонн, цена:",
+            placeholder="Например: дтл,25,60500",
+            help="Формат: продукт,количество,цена",
+            value=default_product_data
+        )
     
     # Кнопка генерации
-    if st.button("🚀 Сгенерировать документы", type="primary"):
-        if input_data:
-            # Проверяем дополнительные поля
-            if delivery_method == "доставка" and (not delivery_address or not delivery_address.strip()):
-                st.error("❌ Пожалуйста, укажите адрес доставки")
+    st.markdown("---")
+    generate_docx = st.button("📄 Сгенерировать DOCX", type="primary", use_container_width=True)
+    
+    # Обработка генерации
+    if generate_docx:
+        # Проверяем заполненность полей
+        if not company_data or not product_data:
+            st.error("❌ Пожалуйста, заполните все поля с данными")
+            return
+        
+        # Проверяем дополнительные поля
+        if delivery_method == "доставка" and (not delivery_address or not delivery_address.strip()):
+            st.error("❌ Пожалуйста, укажите адрес доставки")
+            return
+        
+        if delivery_method == "самовывоз" and not pickup_location:
+            st.error("❌ Пожалуйста, выберите базис для самовывоза")
+            return
+        
+        # Парсим данные
+        try:
+            company_parts = [p.strip() for p in company_data.split(',')]
+            product_parts = [p.strip() for p in product_data.split(',')]
+            
+            if len(company_parts) != 2:
+                st.error("❌ Неверный формат данных компании. Ожидается: компания,номер_дс")
                 return
             
-            if delivery_method == "самовывоз" and not pickup_location:
-                st.error("❌ Пожалуйста, выберите базис для самовывоза")
+            if len(product_parts) != 3:
+                st.error("❌ Неверный формат данных продукта. Ожидается: продукт,количество,цена")
                 return
             
-            # Парсим входные данные
-            parts = [p.strip() for p in input_data.split(',')]
-            if len(parts) != 6:
-                st.error(f"❌ Неверное количество полей. Ожидается 6, а получено {len(parts)}.\nПравильный формат: номер ДС,компания,продукт,цена,количество,дата оплаты")
-                return
+            client_key, dop_num = company_parts
+            product_key, tons_str, price_str = product_parts
             
-            dop_num, client_key, product_key, price_str, tons_str, pay_date = parts
+        except Exception as e:
+            st.error(f"❌ Ошибка при обработке данных: {e}")
+            return
+        
+        with st.spinner("Генерация документа..."):
+            docx_data, pdf_data, filename_base, error = generate_document_new(
+                dop_num=dop_num,
+                client_key=client_key,
+                product_key=product_key,
+                price_str=price_str,
+                tons_str=tons_str,
+                pay_date=pay_date,
+                delivery_method=delivery_method,
+                pickup_location=pickup_location,
+                delivery_address=delivery_address,
+                document_type=document_type
+            )
             
-            with st.spinner("Генерация документов..."):
-                docx_path, pdf_path, error = generate_document_new(
-                    dop_num=dop_num,
-                    client_key=client_key,
-                    product_key=product_key,
-                    price_str=price_str,
-                    tons_str=tons_str,
-                    pay_date=pay_date,
-                    delivery_method=delivery_method,
-                    pickup_location=pickup_location,
-                    delivery_address=delivery_address,
-                    document_type=document_type
-                )
+            if error:
+                st.error(f"❌ {error}")
+            else:
+                st.success("✅ Документ успешно создан!")
                 
-                if error:
-                    st.error(f"❌ {error}")
+                # Сохраняем в историю
+                history_params = {
+                    'dop_num': dop_num,
+                    'client_key': client_key,
+                    'product_key': product_key,
+                    'price_str': price_str,
+                    'tons_str': tons_str,
+                    'pay_date': pay_date.strftime('%Y-%m-%d'),
+                    'delivery_method': delivery_method,
+                    'pickup_location': pickup_location,
+                    'delivery_address': delivery_address,
+                    'document_type': document_type
+                }
+                save_to_history(history_params)
+                
+                # Кнопка скачивания DOCX
+                if docx_data:
+                    st.download_button(
+                        label="📄 Скачать DOCX",
+                        data=docx_data,
+                        file_name=f"{filename_base}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
+                
+                # Показываем информацию о созданном документе
+                st.info(f"🚚 Способ доставки: {delivery_method}")
+                if delivery_method == "самовывоз":
+                    st.info(f"📍 Базис: {pickup_location}")
                 else:
-                    st.success("✅ Документы успешно созданы!")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    # Кнопки для скачивания
-                    if docx_path and os.path.exists(docx_path):
-                        with col1:
-                            with open(docx_path, "rb") as file:
-                                st.download_button(
-                                    label="📄 Скачать DOCX",
-                                    data=file.read(),
-                                    file_name=os.path.basename(docx_path),
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                )
-                    
-                    if pdf_path and os.path.exists(pdf_path):
-                        with col2:
-                            with open(pdf_path, "rb") as file:
-                                st.download_button(
-                                    label="📑 Скачать PDF",
-                                    data=file.read(),
-                                    file_name=os.path.basename(pdf_path),
-                                    mime="application/pdf"
-                                )
-                    
-                    # Показываем информацию о созданном документе
-                    st.info(f"📁 Файлы сохранены в: {os.path.dirname(docx_path)}")
-                    st.info(f"🚚 Способ доставки: {delivery_method}")
-                    if delivery_method == "самовывоз":
-                        st.info(f"📍 Базис: {pickup_location}")
-                    else:
-                        st.info(f"📍 Адрес доставки: {delivery_address}")
-        else:
-            st.warning("⚠️ Пожалуйста, введите данные для генерации документа.")
+                    st.info(f"📍 Адрес доставки: {delivery_address}")
+                st.info(f"📅 Дата оплаты: {pay_date.strftime('%d.%m.%Y')}")
 
-# --- 4. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
+# --- 5. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
 
 def console_app():
     """Консольный интерфейс для генерации документов"""
@@ -618,3 +737,4 @@ def create_sample_json_files():
 if __name__ == "__main__" and not os.path.exists(os.path.join(os.path.dirname(__file__), "json")):
     create_sample_json_files()
     print("📁 Созданы примеры JSON файлов в папке 'json'")
+

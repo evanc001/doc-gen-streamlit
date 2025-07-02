@@ -32,13 +32,15 @@ def load_dictionaries():
     clients = load_json_dict(os.path.join(json_path, "clients.json"))
     products = load_json_dict(os.path.join(json_path, "products.json"))
     locations = load_json_dict(os.path.join(json_path, "locations.json"))
+    neftebazy = load_json_dict(os.path.join(json_path, "nb.json"))
     
-    return clients, products, locations
+    return clients, products, locations, neftebazy
 
 # Статичные словари остаются в коде
 BASISES = {
     "самовывоз": "франко-автотранспортное средство Покупателя на складе Поставщика.",
-    "доставка": "франко-автотранспортное средство Поставщика на складе Покупателя."
+    "доставка": "франко-автотранспортное средство Поставщика на складе Покупателя.",
+    "нефтебаза": "франко-автотранспортное средство Покупателя на складе Поставщика."
 }
 
 # Словарь для даты ("«25» июня") - родительный падеж
@@ -53,55 +55,11 @@ MONTHS_PREPOSITIONAL = {
     7: 'июле', 8: 'августе', 9: 'сентябре', 10: 'октябре', 11: 'ноябре', 12: 'декабре'
 }
 
-# --- 2. ФУНКЦИИ ДЛЯ РАБОТЫ С ИСТОРИЕЙ ---
-
-def load_history():
-    """Загружает историю документов"""
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    history_path = os.path.join(base_path, "history.json")
-    
-    try:
-        with open(history_path, 'r', encoding='utf-8') as f:
-            history = json.load(f)
-            # Сортируем по дате (новые первыми)
-            return sorted(history, key=lambda x: x['created_date'], reverse=True)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-def save_to_history(params):
-    """Сохраняет параметры документа в историю"""
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    history_path = os.path.join(base_path, "history.json")
-    
-    # Загружаем существующую историю
-    history = load_history()
-    
-    # Добавляем новую запись
-    history_entry = {
-        'created_date': datetime.now().isoformat(),
-        'display_date': datetime.now().strftime('%d.%m'),
-        'company': params['client_key'].upper(),
-        'dop_num': params['dop_num'],
-        'params': params  # Сохраняем все параметры
-    }
-    
-    # Добавляем в начало списка
-    history.insert(0, history_entry)
-    
-    # Оставляем только последние 20 записей
-    history = history[:20]
-    
-    # Сохраняем обновленную историю
-    try:
-        with open(history_path, 'w', encoding='utf-8') as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Ошибка при сохранении истории: {e}")
-
-# --- 3. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
+# --- 2. ФУНКЦИИ ГЕНЕРАЦИИ ДОКУМЕНТОВ ---
 
 def generate_document_new(dop_num, client_key, product_key, price_str, tons_str, pay_date, 
-                         delivery_method, pickup_location=None, delivery_address=None, document_type="prepayment"):
+                         delivery_method, pickup_location=None, delivery_address=None, 
+                         neftebaza_location=None, document_type="prepayment"):
     """
     Генерирует документ Word на основе отдельных параметров.
     
@@ -112,9 +70,10 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
         price_str (str): Цена
         tons_str (str): Количество тонн
         pay_date (str): Дата оплаты
-        delivery_method (str): "самовывоз" или "доставка"
+        delivery_method (str): "самовывоз", "доставка" или "нефтебаза"
         pickup_location (str): Локация для самовывоза (если выбран самовывоз)
         delivery_address (str): Адрес доставки (если выбрана доставка)
+        neftebaza_location (str): Нефтебаза (если выбрана нефтебаза)
         document_type (str): "prepayment" или "deferment_pay"
     
     Returns:
@@ -122,7 +81,7 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
     """
     try:
         # Загружаем словари
-        clients, products, locations = load_dictionaries()
+        clients, products, locations, neftebazy = load_dictionaries()
         
         # Определяем шаблон
         template_filename = f"{document_type}.docx"
@@ -149,6 +108,14 @@ def generate_document_new(dop_num, client_key, product_key, price_str, tons_str,
                 if not location_full:
                     errors.append(f"адрес '{pickup_location}'")
                 basis_full = BASISES["самовывоз"]
+        elif delivery_method == "нефтебаза":
+            if not neftebaza_location:
+                errors.append("не выбрана нефтебаза")
+            else:
+                location_full = neftebazy.get(neftebaza_location.lower())
+                if not location_full:
+                    errors.append(f"нефтебаза '{neftebaza_location}'")
+                basis_full = BASISES["нефтебаза"]
         else:  # доставка
             if not delivery_address or not delivery_address.strip():
                 errors.append("не указан адрес доставки")
@@ -229,7 +196,7 @@ def generate_document(input_string, document_type="prepayment"):
     """
     try:
         # Загружаем словари
-        clients, products, locations = load_dictionaries()
+        clients, products, locations, neftebazy = load_dictionaries()
         
         # Определяем шаблон
         template_filename = f"{document_type}.docx"
@@ -249,7 +216,13 @@ def generate_document(input_string, document_type="prepayment"):
         # Проверяем данные в словарях
         client_data = clients.get(client_key)
         product_name = products.get(product_key)
-        location_full = locations.get(location_key)
+        
+        # Определяем локацию в зависимости от способа доставки
+        if basis_key == "нефтебаза":
+            location_full = neftebazy.get(location_key)
+        else:
+            location_full = locations.get(location_key)
+        
         basis_full = BASISES.get(basis_key)
         
         errors = []
@@ -333,7 +306,7 @@ def generate_document(input_string, document_type="prepayment"):
     except Exception as e:
         return None, None, f"Неизвестная ошибка: {e}"
 
-# --- 4. STREAMLIT ИНТЕРФЕЙС ---
+# --- 3. STREAMLIT ИНТЕРФЕЙС ---
 
 def streamlit_app():
     """Создает интерфейс Streamlit для генерации документов"""
@@ -341,13 +314,9 @@ def streamlit_app():
     st.markdown("---")
     
     # Загружаем словари для отображения доступных опций
-    clients, products, locations = load_dictionaries()
+    clients, products, locations, neftebazy = load_dictionaries()
     
-    # Инициализация состояния сессии для хранения параметров
-    if 'form_params' not in st.session_state:
-        st.session_state.form_params = {}
-    
-    # Боковая панель с информацией и историей
+    # Боковая панель с информацией
     with st.sidebar:
         st.header("📋 Справочная информация")
         
@@ -366,28 +335,10 @@ def streamlit_app():
             for key in sorted(locations.keys()):
                 st.text(f"• {key}")
         
-        st.markdown("---")
-        
-        # История документов
-        st.header("📚 История документов")
-        history = load_history()
-        
-        if history:
-            st.markdown("*Нажмите на запись для восстановления параметров*")
-            
-            # Создаем прокручиваемый список
-            for i, entry in enumerate(history):
-                # Формируем строку для отображения
-                display_text = f"{entry['display_date']} {entry['company']}, {entry['dop_num']}"
-                
-                # Создаем кнопку для каждой записи
-                if st.button(display_text, key=f"history_{i}", use_container_width=True):
-                    # Восстанавливаем параметры из истории
-                    params = entry['params']
-                    st.session_state.form_params = params
-                    st.rerun()
-        else:
-            st.text("История пуста")
+        if neftebazy:
+            st.subheader("Доступные нефтебазы:")
+            for key in sorted(neftebazy.keys()):
+                st.text(f"• {key}")
     
     # Основной интерфейс
     st.subheader("🎯 Выбор типа документа")
@@ -400,21 +351,14 @@ def streamlit_app():
             options=["prepayment", "deferment_pay"],
             format_func=lambda x: "Предоплата" if x == "prepayment" else "Отсрочка платежа",
             horizontal=True,
-            index=0 if st.session_state.form_params.get('document_type', 'prepayment') == 'prepayment' else 1
+            index=0
         )
     
     with col2:
         # Поле для ввода даты оплаты с календарем
-        default_date = datetime.now().date()
-        if 'pay_date' in st.session_state.form_params:
-            try:
-                default_date = datetime.strptime(st.session_state.form_params['pay_date'], '%Y-%m-%d').date()
-            except:
-                pass
-        
         pay_date = st.date_input(
             "Дата оплаты:",
-            value=default_date,
+            value=datetime.now().date(),
             help="Выберите дату оплаты"
         )
     
@@ -422,41 +366,47 @@ def streamlit_app():
     
     # Выбор способа доставки
     st.subheader("🚚 Способ доставки")
-    default_delivery = st.session_state.form_params.get('delivery_method', 'самовывоз')
     delivery_method = st.radio(
         "Выберите способ доставки:",
-        options=["самовывоз", "доставка"],
-        format_func=lambda x: "Самовывоз" if x == "самовывоз" else "Доставка",
+        options=["самовывоз", "доставка", "нефтебаза"],
+        format_func=lambda x: {"самовывоз": "Самовывоз", "доставка": "Доставка", "нефтебаза": "Нефтебаза"}[x],
         horizontal=True,
-        index=0 if default_delivery == 'самовывоз' else 1
+        index=0
     )
     
     # Поля в зависимости от способа доставки
     pickup_location = None
     delivery_address = None
+    neftebaza_location = None
     
     if delivery_method == "самовывоз":
         st.subheader("📍 Базис для самовывоза")
         if locations:
-            default_location = st.session_state.form_params.get('pickup_location', list(locations.keys())[0])
-            if default_location not in locations.keys():
-                default_location = list(locations.keys())[0]
-            
             pickup_location = st.selectbox(
                 "Выберите базис:",
                 options=list(locations.keys()),
                 format_func=lambda x: x.upper(),
-                index=list(locations.keys()).index(default_location)
+                index=0
             )
         else:
             st.error("❌ Не найдены доступные базисы в файле locations.json")
+    elif delivery_method == "нефтебаза":
+        st.subheader("📍 Выбор нефтебазы")
+        if neftebazy:
+            neftebaza_location = st.selectbox(
+                "Выберите нефтебазу:",
+                options=list(neftebazy.keys()),
+                format_func=lambda x: x.upper(),
+                index=0
+            )
+        else:
+            st.error("❌ Не найдены доступные нефтебазы в файле nb.json")
     else:  # доставка
         st.subheader("📍 Адрес доставки")
         delivery_address = st.text_input(
             "Введите полный адрес доставки:",
             placeholder="Например: г. Казань, ул. Абсалямова, 19",
-            help="Укажите полный адрес, включая город, улицу и номер дома",
-            value=st.session_state.form_params.get('delivery_address', '')
+            help="Укажите полный адрес, включая город, улицу и номер дома"
         )
     
     st.markdown("---")
@@ -468,29 +418,17 @@ def streamlit_app():
     col1, col2 = st.columns(2)
     
     with col1:
-        # Восстанавливаем данные компании
-        default_company_data = ""
-        if 'client_key' in st.session_state.form_params and 'dop_num' in st.session_state.form_params:
-            default_company_data = f"{st.session_state.form_params['client_key']},{st.session_state.form_params['dop_num']}"
-        
         company_data = st.text_input(
             "Компания, номер ДС:",
             placeholder="Например: Деко,212",
-            help="Формат: компания,номер_дс",
-            value=default_company_data
+            help="Формат: компания,номер_дс"
         )
     
     with col2:
-        # Восстанавливаем данные продукта
-        default_product_data = ""
-        if all(key in st.session_state.form_params for key in ['product_key', 'tons_str', 'price_str']):
-            default_product_data = f"{st.session_state.form_params['product_key']},{st.session_state.form_params['tons_str']},{st.session_state.form_params['price_str']}"
-        
         product_data = st.text_input(
             "Продукт, количество тонн, цена:",
             placeholder="Например: дтл,25,60500",
-            help="Формат: продукт,количество,цена",
-            value=default_product_data
+            help="Формат: продукт,количество,цена"
         )
     
     # Кнопка генерации
@@ -511,6 +449,10 @@ def streamlit_app():
         
         if delivery_method == "самовывоз" and not pickup_location:
             st.error("❌ Пожалуйста, выберите базис для самовывоза")
+            return
+        
+        if delivery_method == "нефтебаза" and not neftebaza_location:
+            st.error("❌ Пожалуйста, выберите нефтебазу")
             return
         
         # Парсим данные
@@ -544,6 +486,7 @@ def streamlit_app():
                 delivery_method=delivery_method,
                 pickup_location=pickup_location,
                 delivery_address=delivery_address,
+                neftebaza_location=neftebaza_location,
                 document_type=document_type
             )
             
@@ -551,21 +494,6 @@ def streamlit_app():
                 st.error(f"❌ {error}")
             else:
                 st.success("✅ Документ успешно создан!")
-                
-                # Сохраняем в историю
-                history_params = {
-                    'dop_num': dop_num,
-                    'client_key': client_key,
-                    'product_key': product_key,
-                    'price_str': price_str,
-                    'tons_str': tons_str,
-                    'pay_date': pay_date.strftime('%Y-%m-%d'),
-                    'delivery_method': delivery_method,
-                    'pickup_location': pickup_location,
-                    'delivery_address': delivery_address,
-                    'document_type': document_type
-                }
-                save_to_history(history_params)
                 
                 # Кнопка скачивания DOCX
                 if docx_data:
@@ -581,11 +509,13 @@ def streamlit_app():
                 st.info(f"🚚 Способ доставки: {delivery_method}")
                 if delivery_method == "самовывоз":
                     st.info(f"📍 Базис: {pickup_location}")
+                elif delivery_method == "нефтебаза":
+                    st.info(f"📍 Нефтебаза: {neftebaza_location}")
                 else:
                     st.info(f"📍 Адрес доставки: {delivery_address}")
                 st.info(f"📅 Дата оплаты: {pay_date.strftime('%d.%m.%Y')}")
 
-# --- 5. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
+# --- 4. КОНСОЛЬНЫЙ ИНТЕРФЕЙС ---
 
 def console_app():
     """Консольный интерфейс для генерации документов"""
@@ -594,7 +524,7 @@ def console_app():
     print("=" * 60)
     
     # Загружаем словари для проверки
-    clients, products, locations = load_dictionaries()
+    clients, products, locations, neftebazy = load_dictionaries()
     
     # Проверяем, что все словари загружены
     if not clients:
@@ -603,6 +533,8 @@ def console_app():
         print("⚠️  Внимание: Словарь товаров пуст или не найден!")
     if not locations:
         print("⚠️  Внимание: Словарь локаций пуст или не найден!")
+    if not neftebazy:
+        print("⚠️  Внимание: Словарь нефтебаз пуст или не найден!")
     
     print("\n📋 ДОСТУПНЫЕ ОПЦИИ:")
     if clients:
@@ -611,6 +543,8 @@ def console_app():
         print(f"   Товары: {', '.join(sorted(products.keys()))}")
     if locations:
         print(f"   Адреса: {', '.join(sorted(locations.keys()))}")
+    if neftebazy:
+        print(f"   Нефтебазы: {', '.join(sorted(neftebazy.keys()))}")
     print(f"   Способы передачи: {', '.join(BASISES.keys())}")
     
     print("\n" + "=" * 60)
@@ -638,6 +572,7 @@ def console_app():
     print("📝 ВВОД ДАННЫХ")
     print("Формат: номер ДС,компания,продукт,цена,способ передачи,количество,дата оплаты,базис")
     print("Пример: 212,деко,дтл,63000,самовывоз,21,20.07.2025,танеко")
+    print("Пример с нефтебазой: 213,деко,дтл,63000,нефтебаза,21,20.07.2025,nb001")
     print("=" * 60)
     
     while True:
