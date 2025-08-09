@@ -1,0 +1,275 @@
+"""
+Модуль data_utils предоставляет функции для загрузки и обработки
+данных, используемых в приложении. Здесь реализованы операции
+чтения JSON словарей, загрузки Excel‑таблиц (как по ссылке, так
+и из загруженного файла), парсинг блока «ТРАНСПОРТ +» и
+подготовка сводной информации для дашборда.
+
+Функции вынесены из основного файла приложения для удобства
+тестирования и облегчения чтения кода.
+"""
+
+from __future__ import annotations
+
+import io
+import os
+import json
+import datetime as _dt
+from functools import lru_cache
+from typing import Dict, Tuple, Iterable, Optional, Any
+
+import pandas as pd
+import requests
+
+
+def load_json_dict(filename: str) -> dict:
+    """Загружает словарь из JSON‑файла.
+
+    При ошибке чтения или разборе возвращает пустой словарь.
+    """
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def load_dictionaries(base_dir: Optional[str] = None) -> Tuple[dict, dict, dict, dict]:
+    """Загружает словари клиентов, товаров, адресов и нефтебаз.
+
+    Все словари хранятся в подкаталоге ``json`` относительно ``base_dir``.
+    Если ``base_dir`` не указана, используется директория текущего файла.
+
+    Returns:
+        tuple(dict, dict, dict, dict): клиенты, продукты, локации, нефтебазы
+    """
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    json_dir = os.path.join(base_dir, 'json')
+    clients = load_json_dict(os.path.join(json_dir, 'clients.json'))
+    products = load_json_dict(os.path.join(json_dir, 'products.json'))
+    locations = load_json_dict(os.path.join(json_dir, 'locations.json'))
+    neftebazy = load_json_dict(os.path.join(json_dir, 'nb.json'))
+    return clients, products, locations, neftebazy
+
+
+def get_month_sheet_name(month: int, year: int) -> str:
+    """Возвращает название листа Google Sheets в формате ``МЕСЯЦ ГОД``.
+
+    Использует русские названия месяцев заглавными буквами.
+    """
+    months = {
+        1: 'ЯНВАРЬ', 2: 'ФЕВРАЛЬ', 3: 'МАРТ', 4: 'АПРЕЛЬ', 5: 'МАЙ', 6: 'ИЮНЬ',
+        7: 'ИЮЛЬ', 8: 'АВГУСТ', 9: 'СЕНТЯБРЬ', 10: 'ОКТЯБРЬ', 11: 'НОЯБРЬ', 12: 'ДЕКАБРЬ'
+    }
+    return f"{months.get(month, '')} {year}"
+
+
+@lru_cache(maxsize=2)
+def _download_google_sheet(sheet_id: str) -> pd.ExcelFile:
+    """Внутренняя функция: скачивает Google Sheets как Excel.
+
+    Используется кеширование, чтобы не загружать файл многократно.
+    При неудаче выбрасывает исключение.
+    """
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+    resp = requests.get(url, timeout=20)
+    resp.raise_for_status()
+    return pd.ExcelFile(io.BytesIO(resp.content))
+
+
+def load_sheet_data(
+    *,
+    file: Optional[Any] = None,
+    sheet_id: Optional[str] = None,
+    date: Optional[_dt.date] = None,
+    prefer_cache: bool = True
+) -> Tuple[pd.DataFrame, pd.DataFrame, str]:
+    """Загружает данные за месяц из Excel‑таблицы.
+
+    Выбирает лист по текущей или указанной дате (формат «АВГУСТ 2025»).
+    Можно передать либо файл (Streamlit uploader), либо идентификатор Google Sheets.
+
+    Args:
+        file: файл‑объект Excel (например, из ``st.file_uploader``). Если указан, используется он.
+        sheet_id: идентификатор Google Sheets. Если ``file`` не указан, будет предпринята попытка
+            скачать файл по ссылке ``export?format=xlsx``.
+        date: дата, для которой нужно выбрать лист. По умолчанию используется ``date.today()``.
+        prefer_cache: если ``True``, будет использовано кэшированное значение для Google Sheets.
+
+    Returns:
+        tuple(pd.DataFrame, pd.DataFrame, str): датафрейм с заголовками (начиная с 3‑ей строки),
+            датафрейм «сырой» (без заголовков) и название листа.
+
+    Raises:
+        RuntimeError: если не удаётся загрузить файл или найти лист.
+    """
+    if date is None:
+        date = _dt.date.today()
+    sheet_name = get_month_sheet_name(date.month, date.year)
+    excel_file: Optional[pd.ExcelFile] = None
+    # Определяем источник данных
+    if file is not None:
+        # Загруженный файл может быть либо ``UploadedFile`` от Streamlit, либо bytes
+        try:
+            excel_file = pd.ExcelFile(file)
+        except Exception as exc:
+            raise RuntimeError(f"Ошибка чтения загруженного файла: {exc}")
+    elif sheet_id:
+        # Пытаемся скачать Google Sheets
+        try:
+            if prefer_cache:
+                excel_file = _download_google_sheet(sheet_id)
+            else:
+                # обход кеша: скачиваем напрямую
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
+                resp = requests.get(url, timeout=20)
+                resp.raise_for_status()
+                excel_file = pd.ExcelFile(io.BytesIO(resp.content))
+        except Exception as exc:
+            # Пробуем открыть локальный файл с тем же именем
+            local_path = f"{sheet_id}.xlsx"
+            if os.path.exists(local_path):
+                excel_file = pd.ExcelFile(local_path)
+            else:
+                raise RuntimeError(f"Не удалось загрузить файл Google Sheets: {exc}")
+    else:
+        raise RuntimeError("Не указан источник данных: требуется файл или sheet_id")
+    # Ищем лист с нужным названием; если нет — переходим к предыдущему месяцу
+    target_sheet = sheet_name
+    if target_sheet not in excel_file.sheet_names:
+        # переходим к предыдущему месяцу
+        prev_month = date.month - 1 or 12
+        prev_year = date.year if date.month > 1 else date.year - 1
+        target_sheet = get_month_sheet_name(prev_month, prev_year)
+        if target_sheet not in excel_file.sheet_names:
+            raise RuntimeError("Лист для текущего или предыдущего месяца не найден")
+    # Читаем данные: строка с индексом 2 содержит заголовки
+    try:
+        df_month = pd.read_excel(excel_file, sheet_name=target_sheet, header=2)
+    except Exception as exc:
+        raise RuntimeError(f"Ошибка чтения листа '{target_sheet}': {exc}")
+    df_raw = pd.read_excel(excel_file, sheet_name=target_sheet, header=None)
+    return df_month, df_raw, target_sheet
+
+
+def parse_transport_table(sheet_df: pd.DataFrame) -> Dict[str, float]:
+    """Разбирает блок "ТРАНСПОРТ +" в таблице.
+
+    Возвращает словарь вида ``{фамилия: сумма}`` для фамилий водителей, встречающихся
+    в блоке «ТРАНСПОРТ +». Суммы берутся из столбца T (index=19) или 25, если
+    в T пусто. В таблице фамилия и сумма могут быть записаны в виде ``Сулейманов Дамир ...``.
+
+    Args:
+        sheet_df: датафрейм листа, прочитанный без заголовков (header=None).
+
+    Returns:
+        dict: ключ — фамилия в нижнем регистре, значение — абсолютное число затрат.
+    """
+    transport_map: Dict[str, float] = {}
+    # Находим начало блока по строке, содержащей «ТРАНСПОРТ»
+    start_indices = sheet_df.index[sheet_df[0].astype(str).str.contains('ТРАНСПОРТ', case=False, na=False)]
+    if len(start_indices) == 0:
+        return transport_map
+    start_idx = int(start_indices[0]) + 1
+    for i in range(start_idx, sheet_df.shape[0]):
+        name_val = sheet_df.at[i, 0]
+        if pd.isna(name_val):
+            break
+        name_str = str(name_val).strip()
+        # Блок заканчивается на строках «ВСЕГО» или «ИТОГО»
+        if name_str.upper() in ['ВСЕГО', 'ИТОГО']:
+            break
+        # Считываем число: сначала из колонки 19 (T), затем из 25
+        value = sheet_df.at[i, 19] if not pd.isna(sheet_df.at[i, 19]) else sheet_df.at[i, 25]
+        try:
+            numeric_value = abs(float(value)) if pd.notna(value) else 0.0
+        except Exception:
+            numeric_value = 0.0
+        surname = name_str.split()[0].lower() if name_str else ''
+        if surname:
+            transport_map[surname] = numeric_value
+    return transport_map
+
+
+def prepare_dashboard_summary(
+    df: pd.DataFrame,
+    clients_dict: Dict[str, Any],
+    transport_map: Dict[str, float]
+) -> Tuple[list, dict]:
+    """Готовит сводные данные для отображения в дашборде.
+
+    Фильтрует строки по списку клиентов, вычисляет суммарный объём и прибыль,
+    находит последний номер доп. соглашения, наличие водителя, отсрочку платежа и
+    транспортные расходы для каждой компании.
+
+    Args:
+        df: датафрейм с заголовками (начиная с 3‑ей строки).
+        clients_dict: словарь клиентов из ``clients.json`` (ключи в нижнем регистре).
+        transport_map: словарь фамилий и сумм из ``parse_transport_table``.
+
+    Returns:
+        tuple(list, dict): список словарей по компаниям и общий итоговый словарь с
+            ключами ``total_volume``, ``total_profit`` и ``total_transport``.
+    """
+    df = df.copy()
+    # нормализуем названия компаний для поиска
+    df['company_key'] = df['Компания'].astype(str).str.lower().str.strip()
+    df_clients = df[df['company_key'].isin(clients_dict.keys())]
+    summary: list = []
+    total_volume = 0.0
+    total_profit = 0.0
+    transport_total = 0.0
+    # Фамилии водителей, встречающиеся в сделках
+    surnames_in_deals: set[str] = set()
+    for _, row in df_clients.iterrows():
+        drv_info = row.get('Данные водителя, а/м, п/п и контактные сведения')
+        if isinstance(drv_info, str) and drv_info.strip():
+            surnames_in_deals.add(drv_info.strip().split()[0].lower())
+    # Суммируем транспортные расходы по найденным фамилиям
+    for s in surnames_in_deals:
+        if s in transport_map:
+            transport_total += transport_map[s]
+    # Группируем по каждой компании
+    for comp_key in sorted(df_clients['company_key'].unique()):
+        comp_df = df_clients[df_clients['company_key'] == comp_key]
+        # Последний номер доп. соглашения
+        try:
+            last_num = int(comp_df['№ доп контрагент'].dropna().astype(int).max())
+        except Exception:
+            last_num = None
+        vol_sum = comp_df['кол-во отгруженного, тн'].fillna(0).sum()
+        prof_sum = comp_df['Итого заработали'].fillna(0).sum()
+        total_volume += vol_sum
+        total_profit += prof_sum
+        driver_missing = comp_df['Данные водителя, а/м, п/п и контактные сведения'].isna().any() or \
+            (comp_df['Данные водителя, а/м, п/п и контактные сведения'].astype(str).str.strip() == '').any()
+        # Существуют ли сделки с отсрочкой, где еще не оплачено
+        pending = comp_df[(comp_df['отсрочка платежа, дн'].fillna(0) >= 1) & (comp_df['Оплачено контрагентом'].isna())]
+        max_defer_days = int(pending['отсрочка платежа, дн'].max()) if not pending.empty else None
+        # Транспортные расходы конкретной компании
+        comp_transport = 0.0
+        comp_surnames: set[str] = set()
+        for drv in comp_df['Данные водителя, а/м, п/п и контактные сведения']:
+            if isinstance(drv, str) and drv.strip():
+                comp_surnames.add(drv.strip().split()[0].lower())
+        for sn in comp_surnames:
+            if sn in transport_map:
+                comp_transport += transport_map[sn]
+        summary.append({
+            'Компания': comp_key,
+            'Последний № ДС': last_num,
+            'Всего отгружено, тн': round(vol_sum, 3),
+            'Всего заработано': round(prof_sum, 2),
+            'Водитель отсутствует': driver_missing,
+            'Отсрочка, дн': max_defer_days,
+            'Транспортные расходы': round(comp_transport, 2)
+        })
+    totals = {
+        'total_volume': round(total_volume, 3),
+        'total_profit': round(total_profit, 2),
+        'total_transport': round(transport_total, 2)
+    }
+    return summary, totals
