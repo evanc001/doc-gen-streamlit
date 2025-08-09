@@ -182,15 +182,21 @@ def parse_transport_table(sheet_df: pd.DataFrame) -> Dict[str, float]:
         # Блок заканчивается на строках «ВСЕГО» или «ИТОГО»
         if name_str.upper() in ['ВСЕГО', 'ИТОГО']:
             break
-        # Считываем число: сначала из колонки 19 (T), затем из 25
-        value = sheet_df.at[i, 19] if not pd.isna(sheet_df.at[i, 19]) else sheet_df.at[i, 25]
+        # Тариф находится в колонке H (index 7), масса – в колонке O (index 14)
+        tariff = sheet_df.at[i, 7]
+        mass = sheet_df.at[i, 14] if sheet_df.shape[1] > 14 else None
         try:
-            numeric_value = abs(float(value)) if pd.notna(value) else 0.0
+            numeric_tariff = float(tariff) if pd.notna(tariff) else 0.0
         except Exception:
-            numeric_value = 0.0
+            numeric_tariff = 0.0
+        try:
+            numeric_mass = float(mass) if pd.notna(mass) else 0.0
+        except Exception:
+            numeric_mass = 0.0
+        cost = numeric_tariff * numeric_mass
         surname = name_str.split()[0].lower() if name_str else ''
         if surname:
-            transport_map[surname] = numeric_value
+            transport_map[surname] = cost
     return transport_map
 
 

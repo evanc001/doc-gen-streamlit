@@ -122,9 +122,28 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Даем возможность пользователю выбрать компании для анализа
     available_companies = sorted(df_deals['company_key'].unique())
     # Предварительно отмечаем те, что совпадают с ключами из clients.json
-    default_selected = [c for c in available_companies if c in clients_dict]
+    default_selected: list[str] = []
+    # Поддержка синонимов: если в clients_dict есть сокращённое название, ищем полное в available_companies
+    synonyms_map = {
+        'тритон': 'тритон трейд',
+        'транзитсити': 'тк транзит сити',
+        'кайрос': 'кайрос тк',
+        'м7': 'м7 софт',
+    }
+    client_keys = set(clients_dict.keys())
+    for comp in available_companies:
+        # если совпадает напрямую
+        if comp in client_keys:
+            default_selected.append(comp)
+        else:
+            # ищем, есть ли сокращённый ключ, который маппится на эту компанию
+            for short_name, full_name in synonyms_map.items():
+                if short_name in client_keys and full_name.lower() == comp:
+                    default_selected.append(comp)
+                    break
+    # если ничего не нашли — выбираем все
     if not default_selected:
-        default_selected = available_companies  # если пересечения нет, выбираем все
+        default_selected = available_companies
     selected_companies = st.multiselect(
         "Выберите компании для анализа",
         options=available_companies,
@@ -133,7 +152,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     )
     # Если ничего не выбрано, показываем все
     if selected_companies:
-        df_deals = df_deals[df_deals['company_key'].isin([c.lower() for c in selected_companies])]
+        selected_keys_lower = [c.lower() for c in selected_companies]
+        df_deals = df_deals[df_deals['company_key'].isin(selected_keys_lower)]
     if df_deals.empty:
         st.info("Нет данных для ваших клиентов за выбранный месяц.")
         return
@@ -167,8 +187,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         last_ds_records.append({'Компания': comp_key, 'Последний № ДС': last_ds})
         volume_profit_records.append({
             'Компания': comp_key,
-            'Всего отгружено, тн': round(vol_sum, 3),
-            'Всего заработано': round(prof_sum, 2)
+            'Всего отгружено, тн': vol_sum,
+            'Всего заработано': prof_sum
         })
         # Отсрочки
         pending_df = comp_df[(comp_df['отсрочка платежа, дн'].fillna(0) >= 1) & (comp_df['Оплачено контрагентом'].isna())]
@@ -188,9 +208,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
             if not isinstance(drv, str) or not drv.strip():
                 missing_driver_records.append({
                     'Компания': comp_key,
-                    '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None,
-                    'Количество, тн': round(float(drow['volume']) if pd.notna(drow['volume']) else 0.0, 3),
-                    'Заработано': round(float(drow['profit']) if pd.notna(drow['profit']) else 0.0, 2)
+                    '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
                 })
     # Вывод метрик
     col1, col2, col3 = st.columns(3)
@@ -204,7 +222,11 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Таблица суммарных объёмов и прибыли
     st.markdown("#### 📦 Общие показатели по компаниям")
     df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
-    st.table(df_vol_prof)
+    # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
+    df_vol_prof_display = df_vol_prof.copy()
+    df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
+    df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
+    st.table(df_vol_prof_display)
     # Таблица отсрочек
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
@@ -214,13 +236,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     if missing_driver_records:
         st.markdown("#### 🚨 Сделки без указания водителя")
         df_missing = pd.DataFrame(missing_driver_records)
-        # Покрасим строки, где отсутствует водитель, красным цветом
+        # Выделяем красным цветом
         df_missing_display = df_missing.copy()
-        # Добавляем HTML для выделения цифр
-        def _style_driver(val):
-            return f"<span style='color:#c0392b;font-weight:bold;'>{val}</span>"
         df_missing_display['Компания'] = df_missing_display['Компания'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
         df_missing_display['№ ДС'] = df_missing_display['№ ДС'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
-        df_missing_display['Количество, тн'] = df_missing_display['Количество, тн'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
-        df_missing_display['Заработано'] = df_missing_display['Заработано'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
         st.markdown(df_missing_display.to_html(escape=False, index=False), unsafe_allow_html=True)
