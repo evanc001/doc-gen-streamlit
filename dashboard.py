@@ -111,12 +111,20 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     df_month = df_month.copy()
     # Нормализуем названия компаний и номер ДС
     df_month['company_key'] = df_month['Компания'].astype(str).str.lower().str.strip()
-    df_month['ds_num'] = pd.to_numeric(df_month['№ доп контрагент'], errors='coerce')
+    # Номера дополнительных соглашений для покупателя и поставщика
+    df_month['ds_client'] = pd.to_numeric(df_month['№ доп контрагент'], errors='coerce')
+    df_month['ds_supplier'] = pd.to_numeric(df_month.get('№ доп поставщик'), errors='coerce')
     # Конвертируем числовые колонки в тип float для корректного суммирования
     df_month['volume'] = pd.to_numeric(df_month['кол-во отгруженного, тн'], errors='coerce')
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
-    df_deals = df_month[df_month['ds_num'].notna()]  # только сделки, где есть номер ДС
-    df_deals = df_deals[df_deals['company_key'].isin(clients_dict.keys())]
+    # Сделки считаем только для строк, где указан номер ДС для контрагента; поставщики исключаются
+    df_deals = df_month[df_month['ds_client'].notna()]
+    # Ограничиваем компании, если они содержатся в списке клиентов; если совпадений нет, используем все
+    all_company_keys = set(df_deals['company_key'].unique())
+    client_keys = set(clients_dict.keys())
+    selected_keys = all_company_keys & client_keys
+    if selected_keys:
+        df_deals = df_deals[df_deals['company_key'].isin(selected_keys)]
     if df_deals.empty:
         st.info("Нет данных для ваших клиентов за выбранный месяц.")
         return
