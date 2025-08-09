@@ -176,8 +176,9 @@ def parse_transport_table(sheet_df: pd.DataFrame) -> Dict[str, float]:
     start_idx = int(start_indices[0]) + 1
     for i in range(start_idx, sheet_df.shape[0]):
         name_val = sheet_df.at[i, 0]
-        if pd.isna(name_val):
-            break
+        # Если строка пустая, пропускаем её, так как таблица может содержать разрывы
+        if pd.isna(name_val) or str(name_val).strip() == '':
+            continue
         name_str = str(name_val).strip()
         # Блок заканчивается на строках «ВСЕГО» или «ИТОГО»
         if name_str.upper() in ['ВСЕГО', 'ИТОГО']:
