@@ -180,7 +180,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Группируем данные по компаниям
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
-        # Последний номер ДС: определяем максимальный номер доп. соглашения (ds_client)
+        # Последний номер ДС: определяем максимальный номер доп. соглашения для компании
         last_ds_value = comp_df['ds_client'].dropna()
         if not last_ds_value.empty:
             try:
@@ -220,7 +220,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                     '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
                 })
 
-        # Сумма долга для компании: суммируем колонку "долг" (колонка V)
+        # Сумма долга для компании: суммируем колонку "долг" (колонка V). Если итог положителен, добавляем в список
         debt_series = pd.to_numeric(comp_df[' долг'], errors='coerce').fillna(0)
         total_debt = debt_series.sum()
         if total_debt > 0:
@@ -236,7 +236,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Таблица последних ДС
     st.markdown("#### 🔢 Последние номера доп. соглашений по компаниям")
     df_last_ds = pd.DataFrame(last_ds_records).sort_values(by='Компания').reset_index(drop=True)
-    st.table(df_last_ds)
+    with st.expander("Показать/скрыть таблицу последних ДС", expanded=False):
+        st.table(df_last_ds)
     # Таблица суммарных объёмов и прибыли
     st.markdown("#### 📦 Общие показатели по компаниям")
     df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
@@ -244,7 +245,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     df_vol_prof_display = df_vol_prof.copy()
     df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
     df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-    st.table(df_vol_prof_display)
+    with st.expander("Показать/скрыть общие показатели по компаниям", expanded=False):
+        st.table(df_vol_prof_display)
     # Таблица отсрочек
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
@@ -264,7 +266,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     if debt_records:
         st.markdown("#### 💸 Должники (положительная задолженность)")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
-        # Форматируем сумму долга без десятичных знаков и с разделением тысяч
         df_debt_display = df_debt.copy()
+        # Сумму долга выводим без десятичных знаков и с разделением тысяч пробелом
         df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
         st.table(df_debt_display)
