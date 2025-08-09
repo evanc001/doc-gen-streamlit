@@ -176,28 +176,21 @@ def parse_transport_table(sheet_df: pd.DataFrame) -> Dict[str, float]:
     start_idx = int(start_indices[0]) + 1
     for i in range(start_idx, sheet_df.shape[0]):
         name_val = sheet_df.at[i, 0]
-        # Если строка пустая, пропускаем её, так как таблица может содержать разрывы
-        if pd.isna(name_val) or str(name_val).strip() == '':
-            continue
+        if pd.isna(name_val):
+            break
         name_str = str(name_val).strip()
         # Блок заканчивается на строках «ВСЕГО» или «ИТОГО»
         if name_str.upper() in ['ВСЕГО', 'ИТОГО']:
             break
-        # Тариф находится в колонке H (index 7), масса – в колонке O (index 14)
-        tariff = sheet_df.at[i, 7]
-        mass = sheet_df.at[i, 14] if sheet_df.shape[1] > 14 else None
+        # Считываем число: сначала из колонки 19 (T), затем из 25
+        value = sheet_df.at[i, 19] if not pd.isna(sheet_df.at[i, 19]) else sheet_df.at[i, 25]
         try:
-            numeric_tariff = float(tariff) if pd.notna(tariff) else 0.0
+            numeric_value = abs(float(value)) if pd.notna(value) else 0.0
         except Exception:
-            numeric_tariff = 0.0
-        try:
-            numeric_mass = float(mass) if pd.notna(mass) else 0.0
-        except Exception:
-            numeric_mass = 0.0
-        cost = numeric_tariff * numeric_mass
+            numeric_value = 0.0
         surname = name_str.split()[0].lower() if name_str else ''
         if surname:
-            transport_map[surname] = cost
+            transport_map[surname] = numeric_value
     return transport_map
 
 
