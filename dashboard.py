@@ -180,8 +180,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Группируем данные по компаниям
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
-        # Последний номер ДС
-        # Определяем максимальный номер дополнительного соглашения для контрагента
+        # Последний номер ДС: определяем максимальный номер доп. соглашения (ds_client)
         last_ds_value = comp_df['ds_client'].dropna()
         if not last_ds_value.empty:
             try:
@@ -220,12 +219,10 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                     'Компания': comp_key,
                     '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
                 })
-        # Долги: Оплачено поставщику - Баланс - Оплачено контрагентом; суммируем только положительные значения
-        paid_supplier_series = pd.to_numeric(comp_df['Оплачено поставщику'], errors='coerce').fillna(0)
-        balance_series = pd.to_numeric(comp_df['Баланс'], errors='coerce').fillna(0)
-        paid_client_series = pd.to_numeric(comp_df['Оплачено контрагентом'], errors='coerce').fillna(0)
-        debt_series = paid_supplier_series - balance_series - paid_client_series
-        total_debt = debt_series[debt_series > 0].sum()
+
+        # Сумма долга для компании: суммируем колонку "долг" (колонка V)
+        debt_series = pd.to_numeric(comp_df[' долг'], errors='coerce').fillna(0)
+        total_debt = debt_series.sum()
         if total_debt > 0:
             debt_records.append({
                 'Компания': comp_key,
@@ -267,6 +264,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     if debt_records:
         st.markdown("#### 💸 Должники (положительная задолженность)")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
+        # Форматируем сумму долга без десятичных знаков и с разделением тысяч
         df_debt_display = df_debt.copy()
         df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
         st.table(df_debt_display)
