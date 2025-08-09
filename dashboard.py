@@ -119,12 +119,21 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
     # Сделки считаем только для строк, где указан номер ДС для контрагента; поставщики исключаются
     df_deals = df_month[df_month['ds_client'].notna()]
-    # Ограничиваем компании, если они содержатся в списке клиентов; если совпадений нет, используем все
-    all_company_keys = set(df_deals['company_key'].unique())
-    client_keys = set(clients_dict.keys())
-    selected_keys = all_company_keys & client_keys
-    if selected_keys:
-        df_deals = df_deals[df_deals['company_key'].isin(selected_keys)]
+    # Даем возможность пользователю выбрать компании для анализа
+    available_companies = sorted(df_deals['company_key'].unique())
+    # Предварительно отмечаем те, что совпадают с ключами из clients.json
+    default_selected = [c for c in available_companies if c in clients_dict]
+    if not default_selected:
+        default_selected = available_companies  # если пересечения нет, выбираем все
+    selected_companies = st.multiselect(
+        "Выберите компании для анализа",
+        options=available_companies,
+        default=default_selected,
+        help="Удерживайте Ctrl/Cmd для выбора нескольких компаний."
+    )
+    # Если ничего не выбрано, показываем все
+    if selected_companies:
+        df_deals = df_deals[df_deals['company_key'].isin([c.lower() for c in selected_companies])]
     if df_deals.empty:
         st.info("Нет данных для ваших клиентов за выбранный месяц.")
         return
