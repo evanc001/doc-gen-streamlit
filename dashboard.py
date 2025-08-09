@@ -166,7 +166,6 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     volume_profit_records = []  # список {'Компания', 'Всего отгружено, тн', 'Всего заработано'}
     delay_records = []  # список {'Компания', '№ ДС', 'Отсрочка, дн'}
     missing_driver_records = []  # список {'Компания', '№ ДС', 'Количество, тн', 'Заработано'}
-    debt_records = []  # список {'Компания', 'Сумма долга'}
     total_volume = 0.0
     total_profit = 0.0
     # Собираем фамилии водителей для подсчёта общих транспортных расходов
@@ -215,19 +214,6 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                     'Компания': comp_key,
                     '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
                 })
-        # Долги: рассчитываем как Оплачено поставщику - Баланс - Оплачено контрагентом
-        # Для каждой строки, где результат положительный, добавляем в общий долг по компании
-        # Приводим необходимые колонки к числу, пропуски считаем нулём
-        paid_supplier_series = pd.to_numeric(comp_df['Оплачено поставщику'], errors='coerce').fillna(0)
-        balance_series = pd.to_numeric(comp_df['Баланс'], errors='coerce').fillna(0)
-        paid_client_series = pd.to_numeric(comp_df['Оплачено контрагентом'], errors='coerce').fillna(0)
-        debt_series = paid_supplier_series - balance_series - paid_client_series
-        total_debt = debt_series[debt_series > 0].sum()
-        if total_debt > 0:
-            debt_records.append({
-                'Компания': comp_key,
-                'Сумма долга': round(float(total_debt), 2)
-            })
     # Вывод метрик
     col1, col2, col3 = st.columns(3)
     col1.metric("Всего отгружено, тн", f"{round(total_volume, 3)}")
@@ -258,13 +244,3 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         df_missing_display = df_missing.copy()
         df_missing_display['Компания'] = df_missing_display['Компания'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
         df_missing_display['№ ДС'] = df_missing_display['№ ДС'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
-        st.markdown(df_missing_display.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    # Таблица должников
-    if debt_records:
-        st.markdown("#### 💸 Должники (положительная задолженность)")
-        df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
-        # Форматируем сумму долга без знаков после запятой и с разделением тысяч
-        df_debt_display = df_debt.copy()
-        df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-        st.table(df_debt_display)
