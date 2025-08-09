@@ -181,9 +181,14 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
         # Последний номер ДС
-        try:
-            last_ds = int(comp_df['ds_num'].max())
-        except Exception:
+        # Определяем максимальный номер дополнительного соглашения для контрагента
+        last_ds_value = comp_df['ds_client'].dropna()
+        if not last_ds_value.empty:
+            try:
+                last_ds = int(last_ds_value.astype(int).max())
+            except Exception:
+                last_ds = None
+        else:
             last_ds = None
         vol_sum = comp_df['volume'].fillna(0).sum()
         prof_sum = comp_df['profit'].fillna(0).sum()
@@ -263,6 +268,5 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         st.markdown("#### 💸 Должники (положительная задолженность)")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
         df_debt_display = df_debt.copy()
-        # Сумму долга выводим без знаков после запятой и с разделением тысяч пробелами
         df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
         st.table(df_debt_display)
