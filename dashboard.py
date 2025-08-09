@@ -136,9 +136,12 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
     # Сделки считаем только для строк, где нет номера ДС поставщика (то есть это сделки контрагента)
     df_deals = df_month[df_month['ds_supplier'].isna()]
+    # Исключаем строки, где название компании отсутствует или представляет собой число (это заголовки/промежуточные строки)
+    df_deals = df_deals[df_deals['company_key'].notna()]
+    df_deals = df_deals[~df_deals['company_key'].str.fullmatch(r'\d+(\.\d+)?', na=False)]
     # Даем возможность пользователю выбрать компании для анализа
     available_companies = sorted(df_deals['company_key'].unique())
-    # Предварительно отмечаем те, что совпадают с ключами из clients.json
+    # Создаем список клиентов по умолчанию, используя clients_dict и синонимы
     default_selected: list[str] = []
     # Поддержка синонимов: если в clients_dict есть сокращённое название, ищем полное в available_companies
     synonyms_map = {
@@ -149,42 +152,40 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     }
     client_keys = set(clients_dict.keys())
     for comp in available_companies:
-        # если совпадает напрямую
+        # Сначала проверяем прямое совпадение со словарем клиентов
         if comp in client_keys:
             default_selected.append(comp)
         else:
-            # ищем, есть ли сокращённый ключ, который маппится на эту компанию
+            # Если в clients_dict сокращенное название клиента присутствует в синонимах, включаем полное
             for short_name, full_name in synonyms_map.items():
                 if short_name in client_keys and full_name.lower() == comp:
                     default_selected.append(comp)
                     break
-    # если ничего не нашли — выбираем все
+    # Если ни одной компании не совпало с клиентами, по умолчанию выбираем все
     if not default_selected:
-        default_selected = available_companies
-    # Предлагаем два режима: Тимур (выбор по списку клиентов) и Все (все компании)
+        default_selected = available_companies.copy()
+    # Фильтр: Тимур = клиенты из json и синонимы, Все = все компании
     filter_mode = st.radio(
         "Фильтр компаний", options=["Тимур", "Все"], index=0,
         help="Выберите 'Тимур', чтобы отображать компании из вашего списка, или 'Все' — все компании из таблицы."
     )
-    # Определяем набор выбранных компаний в зависимости от режима
     if filter_mode == "Тимур":
         selected_companies = default_selected
     else:
         selected_companies = available_companies
-    # Применяем фильтр
+    # Применяем фильтр по выбранным компаниям
     if selected_companies:
-        selected_keys_lower = [c.lower() for c in selected_companies]
-        df_deals = df_deals[df_deals['company_key'].isin(selected_keys_lower)]
+        df_deals = df_deals[df_deals['company_key'].isin([c.lower() for c in selected_companies])]
     if df_deals.empty:
         st.info("Нет данных для ваших клиентов за выбранный месяц.")
         return
-    # Списки и словари для различных сводок
-    last_ds_records = []  # список {'Компания', 'Последний № ДС'}
-    volume_profit_records = []  # список {'Компания', 'Всего отгружено, тн', 'Всего заработано'}
-    delay_records = []  # список {'Компания', '№ ДС', 'Отсрочка, дн'}
-    missing_driver_records = []  # список {'Компания', '№ ДС', 'Количество, тн', 'Заработано'}
-    total_volume = 0.0
-    total_profit = 0.0
+    # Списки для различных сводок
+    last_ds_records: list[dict[str, object]] = []
+    volume_profit_records: list[dict[str, object]] = []
+    delay_records: list[dict[str, object]] = []
+    missing_driver_records: list[dict[str, object]] = []
+    total_volume: float = 0.0
+    total_profit: float = 0.0
     # Собираем фамилии водителей для подсчёта общих транспортных расходов
     surnames_in_deals = set()
     for _, row in df_deals.iterrows():
@@ -202,25 +203,27 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
             last_ds = int(ds_series.max()) if not ds_series.empty else None
         except Exception:
             last_ds = None
-        # Исключаем строки без цены (ни у поставщика, ни у контрагента нет тарифа)
+        # Исключаем строки без цены: если нет значения ни в поставщике, ни в контрагенте, пропускаем такие строки во всех метриках
         price_supplier_col = 'цена за 1 т поставщика' if 'цена за 1 т поставщика' in comp_df.columns else None
         price_client_col = 'цена за 1 т контрагенту с доп. услугами' if 'цена за 1 т контрагенту с доп. услугами' in comp_df.columns else None
         if price_supplier_col and price_client_col:
             comp_df_valid = comp_df[~(comp_df[price_supplier_col].isna() & comp_df[price_client_col].isna())]
         else:
             comp_df_valid = comp_df
+        # Суммируем объём и прибыль
         vol_sum = comp_df_valid['volume'].fillna(0).sum()
         prof_sum = comp_df_valid['profit'].fillna(0).sum()
         total_volume += vol_sum
         total_profit += prof_sum
+        # Сохраняем последний ДС
         last_ds_records.append({'Компания': comp_key, 'Последний № ДС': last_ds})
         volume_profit_records.append({
             'Компания': comp_key,
             'Всего отгружено, тн': vol_sum,
             'Всего заработано': prof_sum
         })
-        # Отсрочки
-        pending_df = comp_df[(comp_df['отсрочка платежа, дн'].fillna(0) >= 1) & (comp_df['Оплачено контрагентом'].isna())]
+        # Отсрочки: учитываем только строки, которые прошли фильтр comp_df_valid
+        pending_df = comp_df_valid[(comp_df_valid['отсрочка платежа, дн'].fillna(0) >= 1) & (comp_df_valid['Оплачено контрагентом'].isna())]
         for _, drow in pending_df.iterrows():
             try:
                 delay_days = int(drow['отсрочка платежа, дн'])
@@ -231,8 +234,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                 '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None,
                 'Отсрочка, дн': delay_days
             })
-        # Отсутствие водителя
-        for _, drow in comp_df.iterrows():
+        # Отсутствие водителя: также игнорируем строки без цены
+        for _, drow in comp_df_valid.iterrows():
             drv = drow.get('Данные водителя, а/м, п/п и контактные сведения')
             if not isinstance(drv, str) or not drv.strip():
                 missing_driver_records.append({
