@@ -38,7 +38,7 @@ def _inject_custom_style() -> None:
         body {
             font-family: "Segoe UI", "Helvetica Neue", sans-serif;
         }
-        /* Метрики: используем стандартные стили Streamlit, не переопределяем фон и цвета. */
+        /* Метрики: не задаём собственный фон и цвета, чтобы использовать стили Streamlit */
         /* Заголовки */
         h2, h3, h4 {
             color: #333333;
@@ -213,18 +213,31 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     col1.metric("Всего отгружено, тн", f"{round(total_volume, 3)}")
     col2.metric("Всего заработано", f"{round(total_profit, 2):.2f}")
     col3.metric("Транспортные расходы", f"{round(transport_total, 2):.2f}")
-    # Таблица последних ДС
-    st.markdown("#### 🔢 Последние номера доп. соглашений по компаниям")
-    df_last_ds = pd.DataFrame(last_ds_records).sort_values(by='Компания').reset_index(drop=True)
-    st.table(df_last_ds)
-    # Таблица суммарных объёмов и прибыли
-    st.markdown("#### 📦 Общие показатели по компаниям")
-    df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
-    # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
-    df_vol_prof_display = df_vol_prof.copy()
-    df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
-    df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-    st.table(df_vol_prof_display)
+    # Таблица последних ДС помещена в раскрывающийся блок
+    with st.expander("🔢 Последние номера доп. соглашений по компаниям", expanded=False):
+        df_last_ds = pd.DataFrame(last_ds_records)
+        # исключаем записи без номера ДС
+        df_last_ds = df_last_ds[df_last_ds['Последний № ДС'].notna()]
+        if not df_last_ds.empty:
+            # приводим номер к целому
+            df_last_ds['Последний № ДС'] = df_last_ds['Последний № ДС'].astype(int)
+            df_last_ds = df_last_ds.sort_values(by='Компания').reset_index(drop=True)
+            st.table(df_last_ds)
+        else:
+            st.info("Нет данных о последних номерах доп. соглашений за выбранный период.")
+    # Таблица суммарных объёмов и прибыли помещена в раскрывающийся блок
+    with st.expander("📦 Общие показатели по компаниям", expanded=False):
+        df_vol_prof = pd.DataFrame(volume_profit_records)
+        # убираем строки, где и объём, и прибыль равны нулю
+        df_vol_prof = df_vol_prof[~((df_vol_prof['Всего отгружено, тн'] == 0) & (df_vol_prof['Всего заработано'] == 0))]
+        if not df_vol_prof.empty:
+            df_vol_prof = df_vol_prof.sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
+            df_vol_prof_display = df_vol_prof.copy()
+            df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
+            df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
+            st.table(df_vol_prof_display)
+        else:
+            st.info("Нет данных по объёму и заработку за выбранный период.")
     # Таблица отсрочек
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
