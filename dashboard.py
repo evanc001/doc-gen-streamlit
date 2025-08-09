@@ -144,13 +144,17 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # если ничего не нашли — выбираем все
     if not default_selected:
         default_selected = available_companies
-    selected_companies = st.multiselect(
-        "Выберите компании для анализа",
-        options=available_companies,
-        default=default_selected,
-        help="Удерживайте Ctrl/Cmd для выбора нескольких компаний."
+    # Предлагаем два режима: Тимур (выбор по списку клиентов) и Все (все компании)
+    filter_mode = st.radio(
+        "Фильтр компаний", options=["Тимур", "Все"], index=0,
+        help="Выберите 'Тимур', чтобы отображать компании из вашего списка, или 'Все' — все компании из таблицы."
     )
-    # Если ничего не выбрано, показываем все
+    # Определяем набор выбранных компаний в зависимости от режима
+    if filter_mode == "Тимур":
+        selected_companies = default_selected
+    else:
+        selected_companies = available_companies
+    # Применяем фильтр
     if selected_companies:
         selected_keys_lower = [c.lower() for c in selected_companies]
         df_deals = df_deals[df_deals['company_key'].isin(selected_keys_lower)]
