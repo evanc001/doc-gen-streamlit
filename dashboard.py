@@ -109,9 +109,12 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     transport_map = parse_transport_table(df_raw)
     # Фильтруем сделки: учитываем только строки, где указан номер ДС
     df_month = df_month.copy()
-    # Нормализуем и фильтруем компании
+    # Нормализуем названия компаний и номер ДС
     df_month['company_key'] = df_month['Компания'].astype(str).str.lower().str.strip()
     df_month['ds_num'] = pd.to_numeric(df_month['№ доп контрагент'], errors='coerce')
+    # Конвертируем числовые колонки в тип float для корректного суммирования
+    df_month['volume'] = pd.to_numeric(df_month['кол-во отгруженного, тн'], errors='coerce')
+    df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
     df_deals = df_month[df_month['ds_num'].notna()]  # только сделки, где есть номер ДС
     df_deals = df_deals[df_deals['company_key'].isin(clients_dict.keys())]
     if df_deals.empty:
@@ -140,8 +143,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
             last_ds = int(comp_df['ds_num'].max())
         except Exception:
             last_ds = None
-        vol_sum = comp_df['кол-во отгруженного, тн'].fillna(0).sum()
-        prof_sum = comp_df['Итого заработали'].fillna(0).sum()
+        vol_sum = comp_df['volume'].fillna(0).sum()
+        prof_sum = comp_df['profit'].fillna(0).sum()
         total_volume += vol_sum
         total_profit += prof_sum
         last_ds_records.append({'Компания': comp_key, 'Последний № ДС': last_ds})
@@ -169,8 +172,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                 missing_driver_records.append({
                     'Компания': comp_key,
                     '№ ДС': int(drow['ds_num']) if pd.notna(drow['ds_num']) else None,
-                    'Количество, тн': round(float(drow['кол-во отгруженного, тн']) if pd.notna(drow['кол-во отгруженного, тн']) else 0.0, 3),
-                    'Заработано': round(float(drow['Итого заработали']) if pd.notna(drow['Итого заработали']) else 0.0, 2)
+                    'Количество, тн': round(float(drow['volume']) if pd.notna(drow['volume']) else 0.0, 3),
+                    'Заработано': round(float(drow['profit']) if pd.notna(drow['profit']) else 0.0, 2)
                 })
     # Вывод метрик
     col1, col2, col3 = st.columns(3)
