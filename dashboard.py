@@ -170,7 +170,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                 delay_days = None
             delay_records.append({
                 'Компания': comp_key,
-                '№ ДС': int(drow['ds_num']) if pd.notna(drow['ds_num']) else None,
+                '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None,
                 'Отсрочка, дн': delay_days
             })
         # Отсутствие водителя
@@ -179,7 +179,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
             if not isinstance(drv, str) or not drv.strip():
                 missing_driver_records.append({
                     'Компания': comp_key,
-                    '№ ДС': int(drow['ds_num']) if pd.notna(drow['ds_num']) else None,
+                    '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None,
                     'Количество, тн': round(float(drow['volume']) if pd.notna(drow['volume']) else 0.0, 3),
                     'Заработано': round(float(drow['profit']) if pd.notna(drow['profit']) else 0.0, 2)
                 })
