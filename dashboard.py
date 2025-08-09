@@ -38,11 +38,12 @@ def _inject_custom_style() -> None:
         body {
             font-family: "Segoe UI", "Helvetica Neue", sans-serif;
         }
-        /* Оформление метрик: не задаём жёсткий фон, чтобы корректно работать
-           как в светлой, так и в тёмной теме. Можно добавить отступы для
-           лучшей читаемости. */
+        /* Метрики */
         .stMetric {
+            background-color: #f7f7f9;
             padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
         /* Заголовки */
         h2, h3, h4 {
@@ -116,9 +117,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Конвертируем числовые колонки в тип float для корректного суммирования
     df_month['volume'] = pd.to_numeric(df_month['кол-во отгруженного, тн'], errors='coerce')
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
-    # Сделки считаем для строк, в которых нет номера ДС поставщика
-    # (т.е. это сделки с контрагентом), даже если номер ДС контрагента отсутствует
-    df_deals = df_month[df_month['ds_supplier'].isna()]
+    # Сделки считаем только для строк, где указан номер ДС для контрагента; поставщики исключаются
+    df_deals = df_month[df_month['ds_client'].notna()]
     # Даем возможность пользователю выбрать компании для анализа
     available_companies = sorted(df_deals['company_key'].unique())
     # Предварительно отмечаем те, что совпадают с ключами из clients.json
@@ -179,11 +179,9 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Группируем данные по компаниям
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
-        # Последний номер ДС — берём максимальное значение из столбца ds_client.
-        # Если номеров нет, оставляем None.
-        ds_series = comp_df['ds_client'].dropna()
+        # Последний номер ДС
         try:
-            last_ds = int(ds_series.max()) if not ds_series.empty else None
+            last_ds = int(comp_df['ds_num'].max())
         except Exception:
             last_ds = None
         vol_sum = comp_df['volume'].fillna(0).sum()
@@ -211,11 +209,17 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         # Отсутствие водителя
         for _, drow in comp_df.iterrows():
             drv = drow.get('Данные водителя, а/м, п/п и контактные сведения')
+            # Если водитель не указан, но при этом есть данные в колонках M (цена за 1 т контрагенту) или N (тзр.1),
+            # добавляем строку в список отсутствующих водителей. Если обе колонки пусты, строку игнорируем.
             if not isinstance(drv, str) or not drv.strip():
-                missing_driver_records.append({
-                    'Компания': comp_key,
-                    '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
-                })
+                price_client = drow.get('цена за 1 т контрагенту с доп. услугами')
+                tzr1 = drow.get('тзр.1')
+                # считаем, что строка актуальна, если хотя бы одна из этих колонок не пуста
+                if (pd.notna(price_client) and price_client != '') or (pd.notna(tzr1) and tzr1 != ''):
+                    missing_driver_records.append({
+                        'Компания': comp_key,
+                        '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
+                    })
     # Вывод метрик
     col1, col2, col3 = st.columns(3)
     col1.metric("Всего отгружено, тн", f"{round(total_volume, 3)}")
@@ -223,16 +227,32 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     col3.metric("Транспортные расходы", f"{round(transport_total, 2):.2f}")
     # Таблица последних ДС в разворачиваемом блоке
     with st.expander("🔢 Последние номера доп. соглашений по компаниям", expanded=False):
-        df_last_ds = pd.DataFrame(last_ds_records).sort_values(by='Компания').reset_index(drop=True)
-        st.table(df_last_ds)
+        df_last_ds = pd.DataFrame(last_ds_records)
+        # Удаляем строки без номера ДС
+        df_last_ds = df_last_ds[df_last_ds['Последний № ДС'].notna()]
+        # Округляем до целого
+        if not df_last_ds.empty:
+            df_last_ds['Последний № ДС'] = df_last_ds['Последний № ДС'].astype(int)
+            df_last_ds = df_last_ds.sort_values(by='Компания').reset_index(drop=True)
+            st.table(df_last_ds)
+        else:
+            st.info("Нет данных о последних номерах доп. соглашений.")
     # Таблица суммарных объёмов и прибыли в разворачиваемом блоке
     with st.expander("📦 Общие показатели по компаниям", expanded=False):
-        df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
-        # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
-        df_vol_prof_display = df_vol_prof.copy()
-        df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
-        df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-        st.table(df_vol_prof_display)
+        df_vol_prof = pd.DataFrame(volume_profit_records)
+        # Удаляем строки, где и объём, и прибыль равны нулю
+        df_vol_prof = df_vol_prof[~((df_vol_prof['Всего отгружено, тн'] == 0) & (df_vol_prof['Всего заработано'] == 0))]
+        if not df_vol_prof.empty:
+            df_vol_prof = df_vol_prof.sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
+            df_vol_prof_display = df_vol_prof.copy()
+            # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
+            df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(
+                lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
+            df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(
+                lambda x: f"{int(round(x)):,}".replace(',', ' '))
+            st.table(df_vol_prof_display)
+        else:
+            st.info("Нет данных по объёму и заработку.")
     # Таблица отсрочек
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
