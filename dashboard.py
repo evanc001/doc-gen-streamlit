@@ -22,6 +22,7 @@ from data_utils import (
     load_dictionaries,
     load_sheet_data,
     parse_transport_table,
+    _download_google_sheet,
 )
 
 
@@ -92,17 +93,33 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Определяем дату (сегодня) для определения листа
     current_date = datetime.date.today()
     try:
-        # Загружаем данные
-        df_month, df_raw, sheet_name = load_sheet_data(
-            file=uploaded_file,
-            sheet_id=sheet_id,
-            date=current_date,
-            prefer_cache=not st.session_state.get('refresh_data', False)
-        )
-        # После успешной загрузки снимаем флаг обновления
-        st.session_state['refresh_data'] = False
+        # Загружаем ExcelFile для получения списка листов
+        if uploaded_file is not None:
+            excel_file = pd.ExcelFile(uploaded_file)
+        elif sheet_id:
+            excel_file = _download_google_sheet(sheet_id)
+        else:
+            raise RuntimeError("Не указан источник данных")
     except Exception as exc:
-        st.error(f"❌ Ошибка загрузки данных: {exc}")
+        st.error(f"❌ Ошибка загрузки файла: {exc}")
+        return
+    # Предлагаем выбрать лист (месяц)
+    sheet_names = excel_file.sheet_names
+    # Сортируем листы так, чтобы последние месяцы были первыми
+    sheet_names_sorted = sorted(sheet_names, key=lambda x: (x.split()[-1], x.split()[0]), reverse=True)
+    default_sheet = sheet_names_sorted[0]
+    selected_sheet = st.selectbox(
+        "Выберите месяц (лист)",
+        options=sheet_names_sorted,
+        index=0,
+        help="Выберите лист из файла для анализа."
+    )
+    # Читаем данные выбранного листа
+    try:
+        df_month = pd.read_excel(excel_file, sheet_name=selected_sheet, header=2)
+        df_raw = pd.read_excel(excel_file, sheet_name=selected_sheet, header=None)
+    except Exception as exc:
+        st.error(f"❌ Ошибка чтения листа '{selected_sheet}': {exc}")
         return
     # Получаем словари клиентов и транспортную таблицу
     clients_dict, _, _, _ = load_dictionaries()
@@ -117,8 +134,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Конвертируем числовые колонки в тип float для корректного суммирования
     df_month['volume'] = pd.to_numeric(df_month['кол-во отгруженного, тн'], errors='coerce')
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
-    # Сделки считаем только для строк, где указан номер ДС для контрагента; поставщики исключаются
-    df_deals = df_month[df_month['ds_client'].notna()]
+    # Сделки считаем только для строк, где нет номера ДС поставщика (то есть это сделки контрагента)
+    df_deals = df_month[df_month['ds_supplier'].isna()]
     # Даем возможность пользователю выбрать компании для анализа
     available_companies = sorted(df_deals['company_key'].unique())
     # Предварительно отмечаем те, что совпадают с ключами из clients.json
@@ -179,13 +196,21 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Группируем данные по компаниям
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
-        # Последний номер ДС
+        # Последний номер ДС (максимальный среди указанных для контрагента)
+        ds_series = comp_df['ds_client'].dropna()
         try:
-            last_ds = int(comp_df['ds_num'].max())
+            last_ds = int(ds_series.max()) if not ds_series.empty else None
         except Exception:
             last_ds = None
-        vol_sum = comp_df['volume'].fillna(0).sum()
-        prof_sum = comp_df['profit'].fillna(0).sum()
+        # Исключаем строки без цены (ни у поставщика, ни у контрагента нет тарифа)
+        price_supplier_col = 'цена за 1 т поставщика' if 'цена за 1 т поставщика' in comp_df.columns else None
+        price_client_col = 'цена за 1 т контрагенту с доп. услугами' if 'цена за 1 т контрагенту с доп. услугами' in comp_df.columns else None
+        if price_supplier_col and price_client_col:
+            comp_df_valid = comp_df[~(comp_df[price_supplier_col].isna() & comp_df[price_client_col].isna())]
+        else:
+            comp_df_valid = comp_df
+        vol_sum = comp_df_valid['volume'].fillna(0).sum()
+        prof_sum = comp_df_valid['profit'].fillna(0).sum()
         total_volume += vol_sum
         total_profit += prof_sum
         last_ds_records.append({'Компания': comp_key, 'Последний № ДС': last_ds})
