@@ -16,6 +16,8 @@ import datetime
 from typing import Optional
 
 import streamlit as st
+import datetime as _dt
+import os
 import pandas as pd
 
 from data_utils import (
@@ -23,6 +25,40 @@ from data_utils import (
     load_sheet_data,
     parse_transport_table,
 )
+
+# ----------- Конфигурация безопасности -----------
+# Простой пароль для доступа к дашборду. Измените при развертывании.
+ADMIN_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "secret")
+
+def _authenticate() -> bool:
+    """Проверяет, прошёл ли пользователь аутентификацию.
+
+    Если пользователь не аутентифицирован или время последней
+    аутентификации истекло (24 часа), запрашивает пароль.
+
+    Returns:
+        bool: True, если пользователь аутентифицирован; False иначе.
+    """
+    # Сохраняем время аутентификации в состоянии сессии
+    auth_time: datetime.datetime | None = st.session_state.get('auth_time')
+    authenticated: bool = st.session_state.get('authenticated', False)
+    # Проверяем, не истекла ли сессия (24 часа)
+    if authenticated and auth_time and (_dt.datetime.now() - auth_time).total_seconds() < 24 * 3600:
+        return True
+    # Если не аутентифицирован, показываем форму ввода пароля
+    with st.expander("🔐 Войти", expanded=not authenticated):
+        password = st.text_input("Введите пароль", type="password")
+        if st.button("Войти"):
+            if password == ADMIN_PASSWORD:
+                st.session_state['authenticated'] = True
+                st.session_state['auth_time'] = _dt.datetime.now()
+                st.success("Успешный вход!")
+                return True
+            else:
+                st.error("Неверный пароль. Попробуйте ещё раз.")
+                return False
+        # Пока пользователь не нажал кнопку, не показываем дашборд
+        return False
 
 
 def _inject_custom_style() -> None:
@@ -38,17 +74,12 @@ def _inject_custom_style() -> None:
         body {
             font-family: "Segoe UI", "Helvetica Neue", sans-serif;
         }
-        /* Метрики
-           Используем CSS‑переменные Streamlit для адаптации к светлой и тёмной теме.
-           Меняем фон и текст, не влияя на работу выпадающих таблиц. */
+        /* Метрики */
         .stMetric {
-            background-color: var(--secondary-background-color);
-            border: 1px solid var(--block-border-color);
-            border-radius: 8px;
+            background-color: #f7f7f9;
             padding: 10px;
-        }
-        .stMetric * {
-            color: var(--text-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
         /* Заголовки */
         h2, h3, h4 {
@@ -82,6 +113,9 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     """
     # Настраиваем стиль
     _inject_custom_style()
+    # Проверяем авторизацию
+    if not _authenticate():
+        return
     # Заголовок
     st.subheader("📊 Дашборд по сделкам (последний месяц)")
     # Предлагаем загрузить файл
@@ -97,9 +131,26 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # Определяем дату (сегодня) для определения листа
     current_date = datetime.date.today()
     try:
+        # Определяем, какой файл использовать: загруженный пользователем или сохранённый ранее
+        file_to_use = None
+        if uploaded_file is not None:
+            file_to_use = uploaded_file
+            # Сохраняем копию, чтобы при следующем запуске загрузить последнюю
+            try:
+                temp_path = 'last_uploaded.xlsx'
+                with open(temp_path, 'wb') as f_out:
+                    f_out.write(uploaded_file.getvalue())
+                st.session_state['last_file_path'] = temp_path
+            except Exception:
+                pass
+        else:
+            # Если пользователь не загрузил файл, пробуем использовать последнюю сохранённую копию
+            last_path = st.session_state.get('last_file_path')
+            if last_path and os.path.exists(last_path):
+                file_to_use = open(last_path, 'rb')
         # Загружаем данные
         df_month, df_raw, sheet_name = load_sheet_data(
-            file=uploaded_file,
+            file=file_to_use,
             sheet_id=sheet_id,
             date=current_date,
             prefer_cache=not st.session_state.get('refresh_data', False)
