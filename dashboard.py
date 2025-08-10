@@ -38,12 +38,17 @@ def _inject_custom_style() -> None:
         body {
             font-family: "Segoe UI", "Helvetica Neue", sans-serif;
         }
-        /* Метрики */
+        /* Метрики
+           Используем CSS‑переменные Streamlit для адаптации к светлой и тёмной теме.
+           Меняем фон и текст, не влияя на работу выпадающих таблиц. */
         .stMetric {
-            background-color: #f7f7f9;
-            padding: 10px;
+            background-color: var(--secondary-background-color);
+            border: 1px solid var(--block-border-color);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            padding: 10px;
+        }
+        .stMetric * {
+            color: var(--text-color);
         }
         /* Заголовки */
         h2, h3, h4 {
@@ -74,12 +79,6 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         sheet_id: идентификатор Google Sheets. Если передан, приложение
             попробует скачать данные по ссылке. При отсутствии доступа
             необходимо использовать загрузку файла вручную.
-
-    В этой версии отсутствует авторизация, однако реализовано
-    сохранение последней загруженной таблицы. Если пользователь
-    не загружает файл, приложение использует сохранённую копию
-    (``last_uploaded.xlsx``). Это позволяет нескольким пользователям
-    работать с одинаковым набором данных и не загружать файл каждый раз.
     """
     # Настраиваем стиль
     _inject_custom_style()
@@ -87,7 +86,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     st.subheader("📊 Дашборд по сделкам (последний месяц)")
     # Предлагаем загрузить файл
     uploaded_file = st.file_uploader(
-        "Загрузите свежий Excel‑файл (.xlsx) с данными или оставьте поле пустым для использования последней версии", 
+        "Загрузите свежий Excel‑файл (.xlsx) с данными или оставьте поле пустым для автоматической загрузки", 
         type=["xlsx"],
         help="Вы можете предварительно скачать таблицу из Google Sheets и загрузить её здесь"
     )
@@ -97,54 +96,16 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         st.session_state['refresh_data'] = True
     # Определяем дату (сегодня) для определения листа
     current_date = datetime.date.today()
-
-    # Путь для сохранения последнего файла
-    import os
-    last_file_path = os.path.join(os.path.dirname(__file__), 'last_uploaded.xlsx')
-
-    # Если загружен новый файл — сохраняем его для последующего использования
-    file_to_load: Optional[object] = None
-    if uploaded_file is not None:
-        file_to_load = uploaded_file
-        try:
-            # сохраняем в локальный файл для повторного использования
-            data_bytes = uploaded_file.getvalue()
-            with open(last_file_path, 'wb') as f:
-                f.write(data_bytes)
-        except Exception:
-            # если не удалось сохранить, ничего страшного
-            pass
-    else:
-        # если файл не загружен, пробуем использовать сохранённый
-        if os.path.exists(last_file_path):
-            try:
-                with open(last_file_path, 'rb') as f:
-                    file_to_load = f.read()
-            except Exception:
-                file_to_load = None
-        # иначе не передаём file параметр в load_sheet_data (использовать Google Sheets)
-        else:
-            file_to_load = None
     try:
         # Загружаем данные
         df_month, df_raw, sheet_name = load_sheet_data(
-            file=file_to_load,
+            file=uploaded_file,
             sheet_id=sheet_id,
             date=current_date,
             prefer_cache=not st.session_state.get('refresh_data', False)
         )
         # После успешной загрузки снимаем флаг обновления
         st.session_state['refresh_data'] = False
-        # Если загрузили данные без загрузки файла (например, из Google), сохраняем их для последующего использования
-        if uploaded_file is None and file_to_load is None:
-            # пытаемся скачать и записать сохранённую копию
-            try:
-                # Сохраняем в last_uploaded.xlsx для повторного использования
-                # Здесь используем sheet_id и загруженный объект df_raw
-                # Получаем Excel файл через pandas.ExcelWriter
-                df_raw.to_excel(last_file_path, index=False, header=False)
-            except Exception:
-                pass
     except Exception as exc:
         st.error(f"❌ Ошибка загрузки данных: {exc}")
         return
@@ -162,11 +123,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     df_month['volume'] = pd.to_numeric(df_month['кол-во отгруженного, тн'], errors='coerce')
     df_month['profit'] = pd.to_numeric(df_month['Итого заработали'], errors='coerce')
     # Сделки считаем только для строк, где указан номер ДС для контрагента; поставщики исключаются
-    df_deals = df_month[df_month['ds_client'].notna()].copy()
-    # Удаляем строки, где company_key выглядит как число или пустая строка (мусорные записи)
-    mask_numeric = df_deals['company_key'].str.match(r'^\d+(\.\d+)?$', na=False)
-    mask_blank = df_deals['company_key'].astype(str).str.strip() == ''
-    df_deals = df_deals[~(mask_numeric | mask_blank)]
+    df_deals = df_month[df_month['ds_client'].notna()]
     # Даем возможность пользователю выбрать компании для анализа
     available_companies = sorted(df_deals['company_key'].unique())
     # Предварительно отмечаем те, что совпадают с ключами из clients.json
@@ -214,7 +171,6 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     volume_profit_records = []  # список {'Компания', 'Всего отгружено, тн', 'Всего заработано'}
     delay_records = []  # список {'Компания', '№ ДС', 'Отсрочка, дн'}
     missing_driver_records = []  # список {'Компания', '№ ДС', 'Количество, тн', 'Заработано'}
-    debt_records = []  # список {'Компания', 'Сумма долга'}
     total_volume = 0.0
     total_profit = 0.0
     # Собираем фамилии водителей для подсчёта общих транспортных расходов
@@ -229,16 +185,9 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     for comp_key in sorted(df_deals['company_key'].unique()):
         comp_df = df_deals[df_deals['company_key'] == comp_key]
         # Последний номер ДС
-        # Используем максимальное значение из колонки ds_client (номер доп. контрагента)
-        # Колонка может содержать Nan, поэтому предварительно отбрасываем пустые значения
-        last_ds_series = comp_df['ds_client'].dropna()
-        if not last_ds_series.empty:
-            try:
-                # Приводим к целому и берём максимум
-                last_ds = int(last_ds_series.astype(int).max())
-            except Exception:
-                last_ds = None
-        else:
+        try:
+            last_ds = int(comp_df['ds_num'].max())
+        except Exception:
             last_ds = None
         vol_sum = comp_df['volume'].fillna(0).sum()
         prof_sum = comp_df['profit'].fillna(0).sum()
@@ -270,49 +219,23 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
                     'Компания': comp_key,
                     '№ ДС': int(drow['ds_client']) if pd.notna(drow['ds_client']) else None
                 })
-        # Подсчёт долга по колонке "долг" (V). Учитываем только положительные значения
-        if 'долг' in comp_df.columns:
-            debt_sum = comp_df['долг'].fillna(0)
-            # Сумма по компании
-            total_debt = debt_sum.sum()
-            # Добавляем только если долг положительный
-            if total_debt > 0:
-                debt_records.append({
-                    'Компания': comp_key,
-                    'Сумма долга': total_debt
-                })
     # Вывод метрик
     col1, col2, col3 = st.columns(3)
     col1.metric("Всего отгружено, тн", f"{round(total_volume, 3)}")
     col2.metric("Всего заработано", f"{round(total_profit, 2):.2f}")
     col3.metric("Транспортные расходы", f"{round(transport_total, 2):.2f}")
-    # Таблица последних ДС и суммарных показателей в сворачиваемых блоках
-    st.markdown("### 🔢 Последние номера доп. соглашений по компаниям")
-    df_last_ds = pd.DataFrame(last_ds_records)
-    # Удаляем строки без номера (None или NaN)
-    df_last_ds = df_last_ds[df_last_ds['Последний № ДС'].notna()]
-    with st.expander("Показать/скрыть таблицу последних ДС", expanded=False):
-        if df_last_ds.empty:
-            st.info("Нет данных о последних номерах доп. соглашений за выбранный период.")
-        else:
-            df_last_ds = df_last_ds.sort_values(by=['Компания']).reset_index(drop=True)
-            st.table(df_last_ds)
+    # Таблица последних ДС
+    st.markdown("#### 🔢 Последние номера доп. соглашений по компаниям")
+    df_last_ds = pd.DataFrame(last_ds_records).sort_values(by='Компания').reset_index(drop=True)
+    st.table(df_last_ds)
     # Таблица суммарных объёмов и прибыли
-    st.markdown("### 📦 Общие показатели по компаниям")
-    df_vol_prof = pd.DataFrame(volume_profit_records)
-    # удаляем компании, у которых объём и прибыль равны нулю
-    df_vol_prof = df_vol_prof[(df_vol_prof['Всего отгружено, тн'] != 0) | (df_vol_prof['Всего заработано'] != 0)]
-    # сортировка по убыванию объёма
-    df_vol_prof = df_vol_prof.sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
+    st.markdown("#### 📦 Общие показатели по компаниям")
+    df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
     # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
     df_vol_prof_display = df_vol_prof.copy()
     df_vol_prof_display['Всего отгружено, тн'] = df_vol_prof_display['Всего отгружено, тн'].apply(lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ','))
     df_vol_prof_display['Всего заработано'] = df_vol_prof_display['Всего заработано'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-    with st.expander("Показать/скрыть общие показатели по компаниям", expanded=False):
-        if df_vol_prof_display.empty:
-            st.info("Нет данных для показа общих показателей.")
-        else:
-            st.table(df_vol_prof_display)
+    st.table(df_vol_prof_display)
     # Таблица отсрочек
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
@@ -327,14 +250,3 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         df_missing_display['Компания'] = df_missing_display['Компания'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
         df_missing_display['№ ДС'] = df_missing_display['№ ДС'].apply(lambda x: f"<span style='color:#c0392b;'>{x}</span>")
         st.markdown(df_missing_display.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-    # Таблица должников (сумма долга по колонке V)
-    if debt_records:
-        st.markdown("#### 💸 Должники")
-        df_debt = pd.DataFrame(debt_records)
-        # Сортируем по сумме долга по убыванию
-        df_debt = df_debt.sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
-        # Форматируем сумму долга без десятичных знаков и с пробелами
-        df_debt_display = df_debt.copy()
-        df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-        st.table(df_debt_display)
