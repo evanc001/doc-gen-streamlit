@@ -131,17 +131,18 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         'м7': 'м7 софт',
         'стаф': 'ТД Стаф'
     }
-    client_keys = set(clients_dict.keys())
+    client_keys = {k.strip().lower() for k in clients_dict.keys()}
+
     for comp in available_companies:
-        # если совпадает напрямую
-        if comp in client_keys:
+        comp_norm = comp.strip().lower()
+        if comp_norm in client_keys:
             default_selected.append(comp)
         else:
-            # ищем, есть ли сокращённый ключ, который маппится на эту компанию
             for short_name, full_name in synonyms_map.items():
-                if short_name in client_keys and full_name.lower() == comp:
+                if short_name in client_keys and full_name.strip().lower() == comp_norm:
                     default_selected.append(comp)
                     break
+
     # если ничего не нашли — выбираем все
     if not default_selected:
         default_selected = available_companies
