@@ -316,8 +316,8 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         lambda x: f"<div style='text-align:left'>{x}</div>"
     )
 
-    # 6) Отрисовка через HTML (чтобы сработал стиль)
-        n_rows = len(df_merged_display)
+    # 6) Отрисовка: автосворачивание, если >10 строк
+    n_rows = len(df_merged_display)
     if n_rows > 10:
         with st.expander("Показать/скрыть общие показатели по компаниям", expanded=False):
             st.markdown(df_merged_display.to_html(escape=False), unsafe_allow_html=True)
