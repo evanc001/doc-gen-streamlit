@@ -293,9 +293,9 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # 3) Форматируем отображение
     df_merged_display = df_merged.copy()
 
-    # Последний № ДС — целое без .0, пустые значения — пустая строка
+    # Последний № ДС — строкой (для левого выравнивания), пустые — пустая строка
     df_merged_display['Последний № ДС'] = df_merged_display['Последний № ДС'].apply(
-        lambda x: "" if pd.isna(x) else int(x)
+        lambda x: "" if pd.isna(x) else str(int(x))
     )
 
     # Объём — 3 знака, с пробелами как разделителями, запятая как десятичный
@@ -311,8 +311,13 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     # 4) Нумерация строк с 1
     df_merged_display.index = df_merged_display.index + 1
 
-    # 5) Отрисовка
-    st.table(df_merged_display)
+    # 5) Левое выравнивание конкретной колонки через HTML
+    df_merged_display['Последний № ДС'] = df_merged_display['Последний № ДС'].apply(
+        lambda x: f"<div style='text-align:left'>{x}</div>"
+    )
+
+    # 6) Отрисовка через HTML (чтобы сработал стиль)
+    st.markdown(df_merged_display.to_html(escape=False), unsafe_allow_html=True)
 
     # Таблица отсрочек
     if delay_records:
