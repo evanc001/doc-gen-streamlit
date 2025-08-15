@@ -323,7 +323,13 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     if delay_records:
         st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
         df_delay = pd.DataFrame(delay_records)
-        st.table(df_delay)
+
+        # Приводим к строкам и левому выравниванию
+        for col in df_delay.columns:
+            df_delay[col] = df_delay[col].apply(lambda x: "" if pd.isna(x) else str(x))
+            df_delay[col] = df_delay[col].apply(lambda x: f"<div style='text-align:left'>{x}</div>")
+
+        st.markdown(df_delay.to_html(escape=False, index=False), unsafe_allow_html=True)
 
     # Таблица отсутствующих водителей
     if missing_driver_records:
@@ -340,6 +346,9 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         st.markdown("#### 💸 Должники (положительная задолженность)")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
         df_debt_display = df_debt.copy()
-        # Сумму долга выводим без десятичных знаков и с разделением тысяч пробелом
+        # Форматируем сумму долга и выравниваем по левому краю
         df_debt_display['Сумма долга'] = df_debt_display['Сумма долга'].apply(lambda x: f"{int(round(x)):,}".replace(',', ' '))
-        st.table(df_debt_display)
+        for col in df_debt_display.columns:
+            df_debt_display[col] = df_debt_display[col].apply(lambda x: "" if pd.isna(x) else str(x))
+            df_debt_display[col] = df_debt_display[col].apply(lambda x: f"<div style='text-align:left'>{x}</div>")
+        st.markdown(df_debt_display.to_html(escape=False, index=False), unsafe_allow_html=True)
