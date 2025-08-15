@@ -129,6 +129,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         'транзитсити': 'тк транзит сити',
         'кайрос': 'кайрос тк',
         'м7': 'м7 софт',
+        'стаф': 'ТД Стаф',
     }
     client_keys = set(clients_dict.keys())
     for comp in available_companies:
