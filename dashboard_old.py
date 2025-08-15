@@ -131,17 +131,18 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         'м7': 'м7 софт',
         'стаф': 'ТД Стаф'
     }
-    client_keys = set(clients_dict.keys())
+    client_keys = {k.strip().lower() for k in clients_dict.keys()}
+
     for comp in available_companies:
-        # если совпадает напрямую
-        if comp in client_keys:
+        comp_norm = comp.strip().lower()
+        if comp_norm in client_keys:
             default_selected.append(comp)
         else:
-            # ищем, есть ли сокращённый ключ, который маппится на эту компанию
             for short_name, full_name in synonyms_map.items():
-                if short_name in client_keys and full_name.lower() == comp:
+                if short_name in client_keys and full_name.strip().lower() == comp_norm:
                     default_selected.append(comp)
                     break
+
     # если ничего не нашли — выбираем все
     if not default_selected:
         default_selected = available_companies
@@ -234,52 +235,12 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     col1.metric("Всего отгружено, тн", f"{round(total_volume, 3)}")
     col2.metric("Всего заработано", f"{round(total_profit, 2):.2f}")
     col3.metric("Транспортные расходы", f"{round(transport_total, 2):.2f}")
-    # === ЕДИНАЯ ТАБЛИЦА ПО КОМПАНИЯМ: Компания — Последний № ДС — Всего отгружено, тн — Всего заработано ===
-st.markdown("#### 📦 Общие показатели по компаниям")
-
-# 1) Формируем исходные таблицы
-df_last_ds = (
-    pd.DataFrame(last_ds_records)
-    .sort_values(by='Компания')
-    .reset_index(drop=True)
-)
-df_vol_prof = (
-    pd.DataFrame(volume_profit_records)
-    .sort_values(by='Всего отгружено, тн', ascending=False)
-    .reset_index(drop=True)
-)
-
-# 2) Мержим и упорядочиваем колонки
-df_merged = (
-    df_vol_prof.merge(df_last_ds, on='Компания', how='left')
-    [['Компания', 'Последний № ДС', 'Всего отгружено, тн', 'Всего заработано']]
-)
-
-# 3) Форматируем отображение
-df_merged_display = df_merged.copy()
-
-# Последний № ДС — целое без .0, пустые значения — пустая строка
-df_merged_display['Последний № ДС'] = df_merged_display['Последний № ДС'].apply(
-    lambda x: "" if pd.isna(x) else int(x)
-)
-
-# Объём — 3 знака, с пробелами как разделителями, запятая как десятичный
-df_merged_display['Всего отгружено, тн'] = df_merged_display['Всего отгружено, тн'].apply(
-    lambda x: f"{x:,.3f}".replace(',', ' ').replace('.', ',')
-)
-
-# Прибыль — без дробной части, разделитель тысяч — пробел
-df_merged_display['Всего заработано'] = df_merged_display['Всего заработано'].apply(
-    lambda x: f"{int(round(x)):,}".replace(',', ' ')
-)
-
-# 4) Нумерация строк с 1
-df_merged_display.index = df_merged_display.index + 1
-
-# 5) Отрисовка
-st.table(df_merged_display)
-
-
+    # Таблица последних ДС
+    st.markdown("#### 🔢 Последние номера доп. соглашений по компаниям")
+    df_last_ds = pd.DataFrame(last_ds_records).sort_values(by='Компания').reset_index(drop=True)
+    with st.expander("Показать/скрыть таблицу последних ДС", expanded=False):
+        st.table(df_last_ds)
+    # Таблица суммарных объёмов и прибыли
     st.markdown("#### 📦 Общие показатели по компаниям")
     df_vol_prof = pd.DataFrame(volume_profit_records).sort_values(by='Всего отгружено, тн', ascending=False).reset_index(drop=True)
     # Форматируем объём и прибыль: объём — 3 знака после запятой, прибыль — без дробной части
@@ -290,7 +251,7 @@ st.table(df_merged_display)
         st.table(df_vol_prof_display)
     # Таблица отсрочек
     if delay_records:
-        st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
+        st.markdown("#### ⏳ Отсрочка")
         df_delay = pd.DataFrame(delay_records)
         st.table(df_delay)
     # Таблица отсутствующих водителей
@@ -305,7 +266,7 @@ st.table(df_merged_display)
 
     # Таблица должников
     if debt_records:
-        st.markdown("#### 💸 Должники (положительная задолженность)")
+        st.markdown("#### 💸 Должники")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
         df_debt_display = df_debt.copy()
         # Сумму долга выводим без десятичных знаков и с разделением тысяч пробелом
