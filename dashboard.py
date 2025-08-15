@@ -321,7 +321,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
 
     # Таблица отсрочек
     if delay_records:
-        st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
+        st.markdown("#### ⏳ Отсрочка")
         df_delay = pd.DataFrame(delay_records)
 
         # Приводим к строкам и левому выравниванию
@@ -343,7 +343,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
 
     # Таблица должников
     if debt_records:
-        st.markdown("#### 💸 Должники (положительная задолженность)")
+        st.markdown("#### 💸 Должники")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
         df_debt_display = df_debt.copy()
         # Форматируем сумму долга и выравниваем по левому краю
