@@ -251,7 +251,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
         st.table(df_vol_prof_display)
     # Таблица отсрочек
     if delay_records:
-        st.markdown("#### ⏳ Сделки с отсрочкой платежа (не оплачено)")
+        st.markdown("#### ⏳ Отсрочка")
         df_delay = pd.DataFrame(delay_records)
         st.table(df_delay)
     # Таблица отсутствующих водителей
@@ -266,7 +266,7 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
 
     # Таблица должников
     if debt_records:
-        st.markdown("#### 💸 Должники (положительная задолженность)")
+        st.markdown("#### 💸 Должники")
         df_debt = pd.DataFrame(debt_records).sort_values(by='Сумма долга', ascending=False).reset_index(drop=True)
         df_debt_display = df_debt.copy()
         # Сумму долга выводим без десятичных знаков и с разделением тысяч пробелом
