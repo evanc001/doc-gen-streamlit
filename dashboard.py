@@ -317,12 +317,12 @@ def display_dashboard(sheet_id: Optional[str] = None) -> None:
     )
 
     # 6) Отрисовка через HTML (чтобы сработал стиль)
-    n_rows = len(df_merged_display)
-if n_rows > 10:
-    with st.expander("Показать/скрыть общие показатели по компаниям", expanded=False):
+        n_rows = len(df_merged_display)
+    if n_rows > 10:
+        with st.expander("Показать/скрыть общие показатели по компаниям", expanded=False):
+            st.markdown(df_merged_display.to_html(escape=False), unsafe_allow_html=True)
+    else:
         st.markdown(df_merged_display.to_html(escape=False), unsafe_allow_html=True)
-else:
-    st.markdown(df_merged_display.to_html(escape=False), unsafe_allow_html=True)
 
     # Таблица отсрочек
     if delay_records:
