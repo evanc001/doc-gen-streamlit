@@ -25,11 +25,11 @@ def display_dashboard():
     df = df_month.copy()
     df.columns = df.columns.str.strip()
 
-    if "Компания" not in df.columns:
+    if "ОКТЯБРЬ 2025" not in df.columns:
         st.error("❌ В таблице не найден столбец 'Компания'.")
         return
 
-    df["Компания"] = df["Компания"].astype(str).str.strip()
+    df["Компания"] = df["ОКТЯБРЬ 2025"].astype(str).str.strip()
     df["company_key"] = df["Компания"].str.lower()
     df_filtered = df[df["company_key"].isin(timur_clients)]
 
