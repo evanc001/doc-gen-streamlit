@@ -185,7 +185,7 @@ def run_app() -> None:
     with tab_dash:
         # Передаем идентификатор вашей Google Sheets. При необходимости можно оставить None,
         # тогда будет доступна только загрузка файла.
-        display_dashboard(sheet_id="1dmVVn25GQNCcCSJeh3xGx1Aics-C1PCwaYyIPgkFVKA")
+        display_dashboard()
 
 
 def main() -> None:
