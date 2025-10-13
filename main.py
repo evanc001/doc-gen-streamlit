@@ -16,7 +16,7 @@ import streamlit as st
 
 from generator_utils import generate_document, BASISES
 from data_utils import load_dictionaries
-from dashboard import display_dashboard, _inject_custom_style
+from dashboard import display_dashboard
 
 
 def run_app() -> None:
@@ -24,7 +24,6 @@ def run_app() -> None:
     # Настройки страницы
     st.set_page_config(page_title="Генератор доп. соглашений", layout="wide")
     # Инъекция пользовательских стилей (общих для всего приложения)
-    _inject_custom_style()
     # Заголовок
     st.markdown("""<h1 style='text-align:center;'>📝 Сервис для работы с договорами</h1>""", unsafe_allow_html=True)
     st.markdown("""<p style='text-align:center;color:gray;'>Создавайте дополнительные соглашения и анализируйте сделки в одном месте</p>""", unsafe_allow_html=True)
