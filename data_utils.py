@@ -368,3 +368,240 @@ def prepare_dashboard_summary(
         'total_transport': round(transport_total, 2)
     }
     return summary, totals
+
+
+def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Парсит данные по компаниям и таблицу «ТРАНСПОРТ +» из необработанного датафрейма.
+
+    В Google Sheets данные организованы таким образом:
+
+    * Колонка A содержит названия компаний, начиная с 3‑ей строки (индекс 2).
+    * Значения в колонке A идут подряд до строки, где встречается «ТРАНСПОРТ +».
+      Строка с этим текстом и последующие служебные строки не входят в таблицу компаний.
+    * После строки «ТРАНСПОРТ +» следует таблица транспортных услуг, которая
+      продолжается до строки, начинающейся с «Трансп» (например, «Трансп Услуги»).
+
+    Позиции столбцов (0‑индексация):
+        A (0) – название компании / фамилия водителя,
+        G (6) – данные водителя (в продажах),
+        H (7) – цена за тонну (в таблице транспортных услуг),
+        M (12) – цена за 1 т (в продажах),
+        O (14) – тоннаж,
+        T (19) – сумма заработка,
+        U (20) – оплачено контрагентом.
+
+    Args:
+        df_raw: DataFrame, считанный без заголовков (header=None).
+
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame]:
+            sales_df — строки продаж по компаниям с колонками
+                [company, tonnage, profit, price_per_ton, paid, driver_info, row_number];
+            transport_df — строки таблицы «ТРАНСПОРТ +» с колонками
+                [surname, price_service, tonnage, cost].
+    """
+    # Списки для накопления данных
+    sales_rows: list = []
+    transport_rows: list = []
+    # Индексы столбцов
+    idx_company = 0
+    idx_driver_info = 6
+    idx_service_price = 7
+    idx_price_per_ton = 12
+    idx_tonnage = 14
+    idx_profit = 19
+    idx_paid = 20
+    # Определяем границы таблицы транспорта
+    transport_start: Optional[int] = None
+    transport_end: Optional[int] = None
+    for i, row in df_raw.iterrows():
+        a_val = str(row.iloc[idx_company]) if idx_company < len(row) else ""
+        a_val_clean = a_val.strip()
+        # Строка начала таблицы перевозок
+        if transport_start is None and a_val_clean.upper() == "ТРАНСПОРТ +":
+            transport_start = i + 1
+            continue
+        # Если мы уже внутри блока, ищем его конец
+        if transport_start is not None and transport_end is None:
+            if a_val_clean.lower().startswith("трансп") and i > transport_start:
+                transport_end = i
+                break
+    # Если начало блока найдено, но конца нет, читаем до конца
+    if transport_start is not None and transport_end is None:
+        transport_end = len(df_raw)
+    # Обход строк и распределение по таблицам
+    for i, row in df_raw.iterrows():
+        row_number = i + 1
+        a_val = str(row.iloc[idx_company]) if idx_company < len(row) else ""
+        a_clean = a_val.strip()
+        # Пропускаем строчки начала секций
+        if a_clean.upper() == "ТРАНСПОРТ +":
+            continue
+        # Таблица перевозок
+        if transport_start is not None and transport_start <= i < transport_end:
+            surname = a_clean
+            # Пропускаем пустые строки или служебные
+            if not surname:
+                continue
+            # Пытаемся преобразовать значения
+            def to_float(val: Any) -> Optional[float]:
+                try:
+                    return float(str(val).replace(' ', '').replace(',', '.'))
+                except Exception:
+                    return None
+            price_service = to_float(row.iloc[idx_service_price])
+            tonnage_val = to_float(row.iloc[idx_tonnage])
+            if price_service is not None and tonnage_val is not None:
+                transport_rows.append(
+                    {
+                        'surname': surname.split()[0].strip() if surname else '',
+                        'price_service': price_service,
+                        'tonnage': tonnage_val,
+                        'cost': price_service * tonnage_val,
+                    }
+                )
+            continue
+        # Строки продаж до «ТРАНСПОРТ +»
+        if transport_start is not None and i >= transport_start:
+            # Мы уже прошли секцию продаж
+            continue
+        # Пропускаем строки без названия компании
+        if not a_clean:
+            continue
+        # Преобразуем числовые значения
+        def parse_float(val: Any) -> Optional[float]:
+            try:
+                s = str(val).strip()
+                if s == '':
+                    return None
+                return float(s.replace(' ', '').replace(',', '.'))
+            except Exception:
+                return None
+        sales_rows.append(
+            {
+                'company': a_clean,
+                'tonnage': parse_float(row.iloc[idx_tonnage]) if idx_tonnage < len(row) else None,
+                'profit': parse_float(row.iloc[idx_profit]) if idx_profit < len(row) else None,
+                'price_per_ton': parse_float(row.iloc[idx_price_per_ton]) if idx_price_per_ton < len(row) else None,
+                'paid': parse_float(row.iloc[idx_paid]) if idx_paid < len(row) else None,
+                'driver_info': str(row.iloc[idx_driver_info]).strip() if idx_driver_info < len(row) and str(row.iloc[idx_driver_info]).strip() != '' else None,
+                'row_number': row_number,
+            }
+        )
+    sales_df = pd.DataFrame(sales_rows)
+    transport_df = pd.DataFrame(transport_rows)
+    return sales_df, transport_df
+
+
+def aggregate_company_metrics(
+    sales_df: pd.DataFrame,
+    transport_df: pd.DataFrame,
+    *,
+    company_filter: Optional[Iterable[str]] = None,
+    synonyms: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """Агрегирует метрики по компаниям и формирует сводные таблицы.
+
+    Args:
+        sales_df: таблица продаж (выход из ``parse_company_and_transport``).
+        transport_df: таблица транспортных услуг.
+        company_filter: список названий компаний, которые нужно учитывать (в
+            нижнем регистре). Если ``None``, учитываются все компании.
+        synonyms: словарь сопоставлений сокращённых и полных названий
+            (ключ — вариант в нижнем регистре, значение — желаемое отображение).
+
+    Returns:
+        Dict[str, Any]:
+            {
+                "summary": DataFrame — сводка по компаниям с колонками
+                    [company, tonnage, profit, transport_cost, net_profit],
+                "debt_table": DataFrame — задолженность/переплата по компаниям,
+                "attention": DataFrame — строки, где тоннаж пустой или ≤ 0,
+                "missing_driver": DataFrame — строки без указания водителя,
+                "transport_details": DataFrame — сведения по совпавшим перевозкам.
+            }
+    """
+    # Копия исходных данных
+    df = sales_df.copy()
+    # Нормализуем названия компаний
+    df['company_lower'] = df['company'].astype(str).str.lower().str.strip()
+    # Применяем словарь синонимов (если предоставлен)
+    if synonyms:
+        df['company_mapped'] = df['company_lower'].apply(lambda x: synonyms.get(x, x))
+    else:
+        df['company_mapped'] = df['company_lower']
+    # Фильтруем по списку компаний
+    if company_filter is not None:
+        filter_set = {c.lower() for c in company_filter}
+        df = df[df['company_mapped'].isin(filter_set)]
+    # Парсим таблицу транспортных услуг: создаём ключ (surname, tonnage)
+    transport_df = transport_df.copy()
+    if not transport_df.empty:
+        transport_df['surname_lower'] = transport_df['surname'].astype(str).str.lower().str.strip()
+        transport_df['tonnage'] = pd.to_numeric(transport_df['tonnage'], errors='coerce')
+    # Считаем стоимость услуги для каждой строки продаж
+    def match_transport_cost(row: pd.Series) -> float:
+        """Находит стоимость услуги для строки продаж.
+        Ищет совпадение по фамилии и тоннажу. Если найдено несколько, берёт сумму.
+        """
+        driver = row.get('driver_info')
+        ton = row.get('tonnage')
+        if not isinstance(driver, str) or not driver.strip() or not pd.notna(ton):
+            return 0.0
+        surname = driver.strip().split()[0].lower()
+        # Найти строки в транспортной таблице с такой фамилией и той же массой (или близкой)
+        if transport_df.empty:
+            return 0.0
+        # В некоторых случаях тоннаж в транспортной таблице может отличаться
+        # за счёт округления. Будем считать совпадением, если разница менее 1 тн.
+        matches = transport_df[
+            (transport_df['surname_lower'] == surname)
+            & (transport_df['tonnage'].sub(ton).abs() < 1.0)
+        ]
+        if matches.empty:
+            return 0.0
+        return float(matches['cost'].sum())
+    df['transport_cost'] = df.apply(match_transport_cost, axis=1)
+    # Вычисляем чистую прибыль: profit - transport_cost
+    # Чистая прибыль = прибыль - транспортные расходы
+    df['net_profit'] = (
+        df['profit'].fillna(0) - df['transport_cost'].fillna(0)
+    )
+    # Вычисляем задолженность/переплату для каждой строки: tonnage * price_per_ton - paid
+    def calc_debt(row: pd.Series) -> float:
+        tonnage = row.get('tonnage')
+        price_per_ton = row.get('price_per_ton')
+        paid = row.get('paid')
+        if pd.notna(tonnage) and pd.notna(price_per_ton):
+            amount = tonnage * price_per_ton
+        else:
+            amount = 0.0
+        if pd.notna(paid):
+            amount -= paid
+        return float(amount)
+    df['debt'] = df.apply(calc_debt, axis=1)
+    # Агрегация по компаниям
+    grouped = df.groupby('company_mapped').agg(
+        company=('company', 'first'),
+        tonnage=('tonnage', 'sum'),
+        profit=('profit', 'sum'),
+        transport_cost=('transport_cost', 'sum'),
+        net_profit=('net_profit', 'sum'),
+        debt=('debt', 'sum'),
+    ).reset_index(drop=True)
+    # Заполняем отсутствующие значения нулями
+    for col in ['tonnage', 'profit', 'transport_cost', 'net_profit', 'debt']:
+        grouped[col] = grouped[col].fillna(0.0)
+    # Сводка задолженности/переплат
+    debt_table = grouped[['company', 'debt']].copy()
+    # Строки, требующие внимания (тоннаж <= 0 или NaN)
+    attention_df = df[(df['tonnage'].isna()) | (df['tonnage'] <= 0)].copy()
+    # Строки без указания водителя
+    missing_driver_df = df[df['driver_info'].isna() | (df['driver_info'].astype(str).str.strip() == '')].copy()
+    return {
+        'summary': grouped,
+        'debt_table': debt_table,
+        'attention': attention_df,
+        'missing_driver': missing_driver_df,
+        'transport_details': transport_df,
+    }
