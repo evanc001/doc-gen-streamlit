@@ -5,6 +5,15 @@
 и из загруженного файла), парсинг блока «ТРАНСПОРТ +» и
 подготовка сводной информации для дашборда.
 
+Добавлена поддержка чтения приватных Google Sheets при помощи
+сервисного аккаунта. Если таблицу невозможно скачать напрямую
+через `requests` (например, у неё доступ ограничен), функция
+``load_sheet_data`` попытается обратиться к Google Sheets API
+через библиотеку gspread и учётные данные сервисного аккаунта,
+хранящиеся в ``st.secrets["gcp_service_account"]``. При
+отсутствии этих зависимостей будет выброшено понятное
+исключение.
+
 Функции вынесены из основного файла приложения для удобства
 тестирования и облегчения чтения кода.
 """
@@ -20,6 +29,30 @@ from typing import Dict, Tuple, Iterable, Optional, Any
 
 import pandas as pd
 import requests
+
+# Импортируем streamlit и библиотеки для работы с Google API. Эти импорты
+# обёрнуты в блок try/except, чтобы модуль мог использоваться вне
+# Streamlit без зависимости от gspread. Когда приложение запускается в
+# среде Streamlit, реальные модули будут доступны и fallback не
+# сработает.
+try:
+    import streamlit as st  # type: ignore
+except Exception:
+    # Определяем упрощённый объект с минимально необходимым API,
+    # чтобы избежать ошибок при обращении к st.secrets вне Streamlit.
+    class _DummyStreamlit:
+        def __getattr__(self, item):  # pragma: no cover
+            raise AttributeError("streamlit is not installed; install streamlit to use this feature")
+    st = _DummyStreamlit()  # type: ignore
+
+try:
+    import gspread  # type: ignore
+    from google.oauth2.service_account import Credentials  # type: ignore
+except Exception:
+    # Если библиотек нет, gspread и Credentials будут None; это
+    # позволит понять, что подключение к приватным таблицам невозможно.
+    gspread = None  # type: ignore
+    Credentials = None  # type: ignore
 
 
 def load_json_dict(filename: str) -> dict:
@@ -118,33 +151,88 @@ def load_sheet_data(
         except Exception as exc:
             raise RuntimeError(f"Ошибка чтения загруженного файла: {exc}")
     elif sheet_id:
-        # Пытаемся скачать Google Sheets
+        # Пытаемся скачать Google Sheets как Excel. Если таблица приватна, то
+        # прямой доступ может завершиться ошибкой.
+        excel_file = None  # type: Optional[pd.ExcelFile]
+        download_exc: Optional[Exception] = None
         try:
             if prefer_cache:
                 excel_file = _download_google_sheet(sheet_id)
             else:
-                # обход кеша: скачиваем напрямую
                 url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
                 resp = requests.get(url, timeout=20)
                 resp.raise_for_status()
                 excel_file = pd.ExcelFile(io.BytesIO(resp.content))
         except Exception as exc:
-            # Пробуем открыть локальный файл с тем же именем
+            # Перехватываем исключение, но не выходим сразу — возможно
+            # получится загрузить таблицу другим способом.
+            download_exc = exc
+            excel_file = None
+        # Если Excel не загрузился, пробуем локальный файл
+        if excel_file is None:
             local_path = f"{sheet_id}.xlsx"
             if os.path.exists(local_path):
-                excel_file = pd.ExcelFile(local_path)
-            else:
-                raise RuntimeError(f"Не удалось загрузить файл Google Sheets: {exc}")
+                try:
+                    excel_file = pd.ExcelFile(local_path)
+                except Exception:
+                    excel_file = None
+        # Если локального файла нет или он не читается, пробуем загрузить
+        # приватную таблицу через сервисный аккаунт, если библиотеки доступны
+        if excel_file is None and gspread is not None and Credentials is not None:
+            # Загружаем сервисные учётные данные из secrets (если они есть)
+            creds_info = None
+            try:
+                if hasattr(st, "secrets"):
+                    creds_info = st.secrets.get("gcp_service_account")  # type: ignore
+            except Exception:
+                creds_info = None
+            if creds_info:
+                try:
+                    # Авторизуемся и открываем таблицу
+                    scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+                    creds = Credentials.from_service_account_info(dict(creds_info), scopes=scopes)
+                    gc = gspread.authorize(creds)
+                    sh = gc.open_by_key(sheet_id)
+                    sheet_names = [ws.title for ws in sh.worksheets()]
+                    target_sheet = sheet_name
+                    if target_sheet not in sheet_names:
+                        # если лист за текущий месяц отсутствует — пробуем предыдущий
+                        prev_month = date.month - 1 or 12
+                        prev_year = date.year if date.month > 1 else date.year - 1
+                        alt_sheet = get_month_sheet_name(prev_month, prev_year)
+                        if alt_sheet in sheet_names:
+                            target_sheet = alt_sheet
+                        else:
+                            raise RuntimeError("Лист для текущего или предыдущего месяца не найден в Google Sheets")
+                    worksheet = sh.worksheet(target_sheet)
+                    values = worksheet.get_all_values()
+                    df_raw = pd.DataFrame(values)
+                    if df_raw.shape[0] < 3:
+                        raise RuntimeError("Недостаточно строк в Google Sheet для определения заголовков")
+                    header = df_raw.iloc[2].tolist()
+                    df_month_gs = pd.DataFrame(df_raw.iloc[3:].values, columns=header)
+                    return df_month_gs, df_raw, target_sheet
+                except Exception as gsex:
+                    # Если чтение через gspread не удалось, запомним ошибку
+                    download_exc = gsex
+            # Если учётных данных нет — приватную таблицу загрузить нельзя
+        if excel_file is None:
+            err_msg = "Не удалось загрузить файл Google Sheets"
+            if download_exc:
+                err_msg += f": {download_exc}"
+            raise RuntimeError(err_msg)
     else:
         raise RuntimeError("Не указан источник данных: требуется файл или sheet_id")
-    # Ищем лист с нужным названием; если нет — переходим к предыдущему месяцу
+    # Если мы дошли до этого места, excel_file определён и содержит данные
     target_sheet = sheet_name
     if target_sheet not in excel_file.sheet_names:
         # переходим к предыдущему месяцу
         prev_month = date.month - 1 or 12
         prev_year = date.year if date.month > 1 else date.year - 1
-        target_sheet = get_month_sheet_name(prev_month, prev_year)
-        if target_sheet not in excel_file.sheet_names:
+        alt_sheet = get_month_sheet_name(prev_month, prev_year)
+        if alt_sheet in excel_file.sheet_names:
+            target_sheet = alt_sheet
+        else:
             raise RuntimeError("Лист для текущего или предыдущего месяца не найден")
     # Читаем данные: строка с индексом 2 содержит заголовки
     try:
