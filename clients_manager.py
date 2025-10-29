@@ -77,6 +77,11 @@ def edit_clients() -> List[str]:
 
     with col2:
         if st.button("🔄 Обновить из файла"):
-            st.experimental_rerun()
+            # Обновляем содержимое текстового поля без перезапуска приложения
+            refreshed = load_clients()
+            updated_text = "\n".join(refreshed) if refreshed else ""
+            # Используем session_state, чтобы обновить значение text_area
+            st.session_state["clients_editor"] = updated_text
+            st.success("✅ Список компаний загружен из файла")
 
     return load_clients()
