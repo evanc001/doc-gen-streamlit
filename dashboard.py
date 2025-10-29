@@ -49,27 +49,29 @@ def display_dashboard() -> None:
     st.set_page_config(page_title="Дашборд по продажам", layout="wide")
     st.title("📊 Дашборд по продажам топлива")
 
-    st.sidebar.header("⚙️ Настройки")
-    # Выбор источника данных
-    st.sidebar.subheader("Источник данных")
+    # Блок настроек: теперь размещаем поля в основном интерфейсе, чтобы они
+    # были видимы даже при свернутой боковой панели. Можно использовать
+    # columns для компактного размещения.
+    st.markdown("### ⚙️ Настройки")
     try:
         sheet_id_default = str(st.secrets.get("default_sheet_id", ""))
     except Exception:
         sheet_id_default = ""
-    sheet_id = st.sidebar.text_input(
-        "ID Google Sheets",
-        value=sheet_id_default,
-        help=(
-            "Укажите идентификатор Google Sheets. Таблица должна быть доступна "
-            "либо публично, либо через сервисный аккаунт, указанный в .streamlit/secrets.toml."
-        ),
-    )
-    uploaded_file = st.sidebar.file_uploader(
-        "Или загрузите Excel‑файл", type=["xlsx", "xlsm", "xls"],
-    )
-    # Кнопка для выбора режима отображения: Тимур или Все
-    filter_option = st.sidebar.radio("Фильтр компаний", options=["Тимур", "Все"], index=0)
-    # Список компаний для Тимура
+    col_setting1, col_setting2 = st.columns(2)
+    with col_setting1:
+        sheet_id = st.text_input(
+            "ID Google Sheets",
+            value=sheet_id_default,
+            help=(
+                "Укажите идентификатор Google Sheets. Таблица должна быть доступна "
+                "либо публично, либо через сервисный аккаунт, указанный в .streamlit/secrets.toml."
+            ),
+        )
+    with col_setting2:
+        uploaded_file = st.file_uploader(
+            "Или загрузите Excel‑файл", type=["xlsx", "xlsm", "xls"],
+        )
+    filter_option = st.radio("Фильтр компаний", options=["Тимур", "Все"], index=0)
     timur_clients = edit_clients()
 
     st.markdown("---")
