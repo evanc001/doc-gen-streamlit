@@ -60,28 +60,29 @@ def edit_clients() -> List[str]:
     st.subheader("🧾 Список компаний Тимура")
     clients = load_clients()
     default_text = "\n".join(clients) if clients else ""
-
+    # Инициализируем состояние для текстового поля, чтобы значение сохранялось между перерисовками
+    if 'clients_editor_default' not in st.session_state:
+        st.session_state['clients_editor_default'] = default_text
+    # Показываем текстовое поле с текущим состоянием
     edited_text = st.text_area(
         "Редактируйте список компаний (по одной в строке):",
-        value=default_text,
+        value=st.session_state['clients_editor_default'],
         height=200,
         key="clients_editor",
     )
-
     col1, col2 = st.columns([1, 2])
     with col1:
         if st.button("💾 Сохранить изменения"):
             new_list = [c.strip().lower() for c in edited_text.split("\n") if c.strip()]
             save_clients(new_list)
+            # Обновляем состояние по умолчанию
+            st.session_state['clients_editor_default'] = "\n".join(new_list)
             st.success("✅ Список компаний обновлён!")
-
     with col2:
         if st.button("🔄 Обновить из файла"):
-            # Обновляем содержимое текстового поля без перезапуска приложения
             refreshed = load_clients()
             updated_text = "\n".join(refreshed) if refreshed else ""
-            # Используем session_state, чтобы обновить значение text_area
-            st.session_state["clients_editor"] = updated_text
+            st.session_state['clients_editor_default'] = updated_text
+            st.session_state['clients_editor'] = updated_text
             st.success("✅ Список компаний загружен из файла")
-
     return load_clients()

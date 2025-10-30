@@ -404,6 +404,9 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
     sales_rows: list = []
     transport_rows: list = []
     # Индексы столбцов
+    # Основные поля: название компании (A), данные водителя (G), цена услуги (H),
+    # цена за 1 т (M), тоннаж (O), прибыль (T) и оплачено (U). Эти индексы
+    # используют нулевую нумерацию столбцов.
     idx_company = 0
     idx_driver_info = 6
     idx_service_price = 7
@@ -411,6 +414,12 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
     idx_tonnage = 14
     idx_profit = 19
     idx_paid = 20
+    # Дополнительные индексы: номера B, F, G, которые используются для фильтрации
+    # строк. Если во всех трёх колонках (B, F, G) нет данных, строка считается
+    # сводной/служебной и пропускается.
+    idx_B = 1
+    idx_F = 5
+    idx_G = 6
     # Определяем границы таблицы транспорта
     transport_start: Optional[int] = None
     transport_end: Optional[int] = None
@@ -441,6 +450,18 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
         a_val = str(row.iloc[idx_company]) if idx_company < len(row) else ""
         a_clean = a_val.strip()
         if not a_clean:
+            # Если название компании не указано, пропускаем строку
+            continue
+        # Проверяем наличие данных в обязательных столбцах B, F, G. Если во всех
+        # трёх столбцах пусто или NaN, это агрегированная строка (например,
+        # сводная сумма) — такие строки исключаются из расчётов. Для проверки
+        # используем индексы idx_B, idx_F, idx_G.
+        def _cell_empty(val: Any) -> bool:
+            return (val is None) or (isinstance(val, float) and pd.isna(val)) or (str(val).strip() == '')
+        val_B = row.iloc[idx_B] if idx_B < len(row) else None
+        val_F = row.iloc[idx_F] if idx_F < len(row) else None
+        val_G = row.iloc[idx_G] if idx_G < len(row) else None
+        if _cell_empty(val_B) and _cell_empty(val_F) and _cell_empty(val_G):
             continue
         # Преобразуем числовые значения
         def parse_float(val: Any) -> Optional[float]:

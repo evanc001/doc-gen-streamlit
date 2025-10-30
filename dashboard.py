@@ -109,7 +109,7 @@ def display_dashboard() -> None:
     )
     summary_df: pd.DataFrame = agg_results['summary']
     debt_table: pd.DataFrame = agg_results['debt_table']
-    attention_df: pd.DataFrame = agg_results['attention']
+    # attention_df больше не используется в интерфейсе
     missing_driver_df: pd.DataFrame = agg_results['missing_driver']
     # Основные метрики (чистая прибыль, транспортные расходы, прибыль)
     total_net_profit = summary_df['net_profit'].sum()
@@ -160,18 +160,6 @@ def display_dashboard() -> None:
     else:
         st.info("Нет информации о задолженности или переплате.")
 
-    st.subheader("🚩 Строки, требующие внимания (тоннаж ≤ 0)")
-    if not attention_df.empty:
-        att_df = attention_df[['company', 'tonnage', 'profit', 'row_number']].rename(columns={
-            'company': 'Компания',
-            'tonnage': 'Тоннаж',
-            'profit': 'Прибыль',
-            'row_number': 'Номер строки'
-        })
-        with st.expander("Показать / скрыть таблицу"):
-            st.dataframe(att_df, hide_index=True)
-    else:
-        st.info("Нет строк, где тоннаж пустой или отрицательный.")
 
     st.subheader("🚫 Строки без указания водителя")
     if not missing_driver_df.empty:
