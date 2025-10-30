@@ -461,7 +461,10 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
         val_B = row.iloc[idx_B] if idx_B < len(row) else None
         val_F = row.iloc[idx_F] if idx_F < len(row) else None
         val_G = row.iloc[idx_G] if idx_G < len(row) else None
-        if _cell_empty(val_B) and _cell_empty(val_F) and _cell_empty(val_G):
+        # Исключаем строки, где в любом из ключевых столбцов (B, F, G) нет данных.
+        # Если хотя бы один из этих столбцов пустой, строка относится к поставщику
+        # или служебной сумме и не должна участвовать в расчётах по клиентам.
+        if _cell_empty(val_B) or _cell_empty(val_F) or _cell_empty(val_G):
             continue
         # Преобразуем числовые значения
         def parse_float(val: Any) -> Optional[float]:
