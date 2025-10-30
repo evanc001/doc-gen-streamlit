@@ -414,58 +414,32 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
     # Определяем границы таблицы транспорта
     transport_start: Optional[int] = None
     transport_end: Optional[int] = None
+    # Ищем строку с маркером «ТРАНСПОРТ +»
     for i, row in df_raw.iterrows():
         a_val = str(row.iloc[idx_company]) if idx_company < len(row) else ""
-        a_val_clean = a_val.strip()
-        # Строка начала таблицы перевозок
-        if transport_start is None and a_val_clean.upper() == "ТРАНСПОРТ +":
-            transport_start = i + 1
-            continue
-        # Если мы уже внутри блока, ищем его конец
-        if transport_start is not None and transport_end is None:
-            if a_val_clean.lower().startswith("трансп") and i > transport_start:
-                transport_end = i
+        if a_val.strip().upper() == "ТРАНСПОРТ +":
+            transport_start = i
+            break
+    # Если начало найдено, ищем конец — строку, начинающуюся с «Трансп»
+    if transport_start is not None:
+        for j in range(transport_start + 1, len(df_raw)):
+            a_val = str(df_raw.iloc[j, idx_company])
+            if a_val.strip().lower().startswith("трансп"):
+                transport_end = j
                 break
-    # Если начало блока найдено, но конца нет, читаем до конца
-    if transport_start is not None and transport_end is None:
-        transport_end = len(df_raw)
-    # Обход строк и распределение по таблицам
-    for i, row in df_raw.iterrows():
+        if transport_end is None:
+            transport_end = len(df_raw)
+    else:
+        transport_end = None
+    # Определяем диапазоны продаж и транспорта
+    sales_start = 2  # первые две строки — заголовки
+    sales_end = (transport_start - 1) if transport_start is not None else len(df_raw) - 1
+    # Собираем продажи
+    for i in range(sales_start, sales_end + 1):
+        row = df_raw.iloc[i]
         row_number = i + 1
         a_val = str(row.iloc[idx_company]) if idx_company < len(row) else ""
         a_clean = a_val.strip()
-        # Пропускаем строчки начала секций
-        if a_clean.upper() == "ТРАНСПОРТ +":
-            continue
-        # Таблица перевозок
-        if transport_start is not None and transport_start <= i < transport_end:
-            surname = a_clean
-            # Пропускаем пустые строки или служебные
-            if not surname:
-                continue
-            # Пытаемся преобразовать значения
-            def to_float(val: Any) -> Optional[float]:
-                try:
-                    return float(str(val).replace(' ', '').replace(',', '.'))
-                except Exception:
-                    return None
-            price_service = to_float(row.iloc[idx_service_price])
-            tonnage_val = to_float(row.iloc[idx_tonnage])
-            if price_service is not None and tonnage_val is not None:
-                transport_rows.append(
-                    {
-                        'surname': surname.split()[0].strip() if surname else '',
-                        'price_service': price_service,
-                        'tonnage': tonnage_val,
-                        'cost': price_service * tonnage_val,
-                    }
-                )
-            continue
-        # Строки продаж до «ТРАНСПОРТ +»
-        if transport_start is not None and i >= transport_start:
-            # Мы уже прошли секцию продаж
-            continue
-        # Пропускаем строки без названия компании
         if not a_clean:
             continue
         # Преобразуем числовые значения
@@ -488,6 +462,33 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
                 'row_number': row_number,
             }
         )
+    # Собираем транспорт
+    if transport_start is not None:
+        # данные начинаются со строки после маркера (transport_start + 1)
+        t_start = transport_start + 1
+        t_end = transport_end if transport_end is not None else len(df_raw)
+        for i in range(t_start, t_end):
+            row = df_raw.iloc[i]
+            surname_full = str(row.iloc[idx_company]).strip() if idx_company < len(row) else ""
+            if not surname_full:
+                continue
+            # преобразование чисел
+            def to_float(val: Any) -> Optional[float]:
+                try:
+                    return float(str(val).replace(' ', '').replace(',', '.'))
+                except Exception:
+                    return None
+            price_service = to_float(row.iloc[idx_service_price]) if idx_service_price < len(row) else None
+            tonnage_val = to_float(row.iloc[idx_tonnage]) if idx_tonnage < len(row) else None
+            if price_service is not None and tonnage_val is not None:
+                transport_rows.append(
+                    {
+                        'surname': surname_full.split()[0] if surname_full else '',
+                        'price_service': price_service,
+                        'tonnage': tonnage_val,
+                        'cost': price_service * tonnage_val,
+                    }
+                )
     sales_df = pd.DataFrame(sales_rows)
     transport_df = pd.DataFrame(transport_rows)
     return sales_df, transport_df
