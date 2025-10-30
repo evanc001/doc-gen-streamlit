@@ -564,28 +564,38 @@ def aggregate_company_metrics(
     if not transport_df.empty:
         transport_df['surname_lower'] = transport_df['surname'].astype(str).str.lower().str.strip()
         transport_df['tonnage'] = pd.to_numeric(transport_df['tonnage'], errors='coerce')
+    # Подготовим справочник перевозок: для каждой пары (фамилия, тоннаж)
+    # храним список стоимости услуг. Будем вычитать один элемент при совпадении,
+    # чтобы избежать двойного использования одной и той же записи.
+    transport_lookup: Dict[Tuple[str, float], list] = {}
+    if not transport_df.empty:
+        # нормализуем фамилии и округляем тоннаж до трёх знаков для сопоставления
+        transport_df['surname_lower'] = transport_df['surname'].astype(str).str.lower().str.strip()
+        for _, trow in transport_df.iterrows():
+            try:
+                t_surname = trow['surname_lower']
+                t_tonnage = float(trow['tonnage'])
+                t_cost = float(trow['cost'])
+            except Exception:
+                continue
+            key = (t_surname, round(t_tonnage, 3))
+            transport_lookup.setdefault(key, []).append(t_cost)
     # Считаем стоимость услуги для каждой строки продаж
     def match_transport_cost(row: pd.Series) -> float:
-        """Находит стоимость услуги для строки продаж.
-        Ищет совпадение по фамилии и тоннажу. Если найдено несколько, берёт сумму.
-        """
+        """Находит стоимость услуги для строки продаж, используя фамилию
+        водителя и тоннаж. Использует словарь transport_lookup, где каждая
+        запись используется не более одного раза."""
         driver = row.get('driver_info')
         ton = row.get('tonnage')
         if not isinstance(driver, str) or not driver.strip() or not pd.notna(ton):
             return 0.0
         surname = driver.strip().split()[0].lower()
-        # Найти строки в транспортной таблице с такой фамилией и той же массой (или близкой)
-        if transport_df.empty:
-            return 0.0
-        # В некоторых случаях тоннаж в транспортной таблице может отличаться
-        # за счёт округления. Будем считать совпадением, если разница менее 1 тн.
-        matches = transport_df[
-            (transport_df['surname_lower'] == surname)
-            & (transport_df['tonnage'].sub(ton).abs() < 1.0)
-        ]
-        if matches.empty:
-            return 0.0
-        return float(matches['cost'].sum())
+        key = (surname, round(float(ton), 3))
+        cost_list = transport_lookup.get(key)
+        if cost_list and len(cost_list) > 0:
+            # Возвращаем и удаляем первую найденную стоимость
+            return float(cost_list.pop(0))
+        return 0.0
     df['transport_cost'] = df.apply(match_transport_cost, axis=1)
     # Вычисляем чистую прибыль: profit - transport_cost
     # Чистая прибыль = прибыль - транспортные расходы
