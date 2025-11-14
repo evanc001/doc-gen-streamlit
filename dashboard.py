@@ -105,8 +105,22 @@ def display_dashboard() -> None:
             edit_clients(available_companies=None)
         return
     
+    # Проверяем, что данные успешно распарсены
+    if sales_df.empty:
+        st.warning("Не найдено данных о продажах в таблице. Проверьте формат данных.")
+        if filter_option == "Тимур":
+            edit_clients(available_companies=None)
+        return
+    
+    # Проверяем наличие колонки 'company'
+    if 'company' not in sales_df.columns:
+        st.error("Ошибка: в данных отсутствует колонка 'company'. Проверьте формат таблицы.")
+        if filter_option == "Тимур":
+            edit_clients(available_companies=None)
+        return
+    
     # Извлекаем уникальные компании из загруженных данных
-    available_companies = sorted(sales_df['company'].unique().tolist()) if not sales_df.empty else []
+    available_companies = sorted(sales_df['company'].unique().tolist()) if not sales_df.empty and 'company' in sales_df.columns else []
     
     # Показываем интерфейс управления компаниями с доступными компаниями
     if filter_option == "Тимур":

@@ -513,8 +513,17 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
                         'cost': price_service * tonnage_val,
                     }
                 )
-    sales_df = pd.DataFrame(sales_rows)
-    transport_df = pd.DataFrame(transport_rows)
+    # Создаем DataFrame с правильными колонками, даже если данных нет
+    if not sales_rows:
+        sales_df = pd.DataFrame(columns=['company', 'tonnage', 'profit', 'price_per_ton', 'paid', 'driver_info', 'row_number'])
+    else:
+        sales_df = pd.DataFrame(sales_rows)
+    
+    if not transport_rows:
+        transport_df = pd.DataFrame(columns=['surname', 'price_service', 'tonnage', 'cost'])
+    else:
+        transport_df = pd.DataFrame(transport_rows)
+    
     return sales_df, transport_df
 
 
@@ -546,6 +555,20 @@ def aggregate_company_metrics(
                 "transport_details": DataFrame — сведения по совпавшим перевозкам.
             }
     """
+    # Проверяем, что sales_df не пустой и содержит необходимые колонки
+    if sales_df.empty:
+        return {
+            'summary': pd.DataFrame(columns=['company', 'tonnage', 'profit', 'transport_cost', 'net_profit']),
+            'debt_table': pd.DataFrame(columns=['company', 'debt']),
+            'attention': pd.DataFrame(),
+            'missing_driver': pd.DataFrame(),
+            'transport_details': transport_df,
+        }
+    
+    # Проверяем наличие колонки 'company'
+    if 'company' not in sales_df.columns:
+        raise ValueError("DataFrame sales_df должен содержать колонку 'company'")
+    
     # Копия исходных данных
     df = sales_df.copy()
     # Нормализуем названия компаний
