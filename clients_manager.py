@@ -11,6 +11,7 @@ import json
 import streamlit as st
 from pathlib import Path
 from typing import List
+from emoji_icons import get_icon_html
 
 # Путь к файлу, где хранится список клиентов. Используем относительный
 # путь, чтобы файл лежал рядом с запуском приложения.
@@ -57,7 +58,7 @@ def edit_clients() -> List[str]:
     Returns:
         List[str]: список названий компаний в нижнем регистре.
     """
-    st.subheader("🧾 Список компаний Тимура")
+    st.markdown(f"### {get_icon_html('🧾', 20)} Список компаний Тимура", unsafe_allow_html=True)
     clients = load_clients()
     default_text = "\n".join(clients) if clients else ""
     # Инициализируем состояние для текстового поля, чтобы значение сохранялось между перерисовками
@@ -72,17 +73,17 @@ def edit_clients() -> List[str]:
     )
     col1, col2 = st.columns([1, 2])
     with col1:
-        if st.button("💾 Сохранить изменения"):
+        if st.button("Сохранить изменения"):
             new_list = [c.strip().lower() for c in edited_text.split("\n") if c.strip()]
             save_clients(new_list)
             # Обновляем состояние по умолчанию
             st.session_state['clients_editor_default'] = "\n".join(new_list)
-            st.success("✅ Список компаний обновлён!")
+            st.success("Список компаний обновлён!")
     with col2:
-        if st.button("🔄 Обновить из файла"):
+        if st.button("Обновить из файла"):
             refreshed = load_clients()
             updated_text = "\n".join(refreshed) if refreshed else ""
             st.session_state['clients_editor_default'] = updated_text
             st.session_state['clients_editor'] = updated_text
-            st.success("✅ Список компаний загружен из файла")
+            st.success("Список компаний загружен из файла")
     return load_clients()

@@ -17,6 +17,7 @@ import streamlit as st
 from generator_utils import generate_document, BASISES
 from data_utils import load_dictionaries
 from dashboard import display_dashboard
+from emoji_icons import get_icon_html
 
 
 def run_app() -> None:
@@ -25,7 +26,7 @@ def run_app() -> None:
     st.set_page_config(page_title="Генератор доп. соглашений", layout="wide")
     # Инъекция пользовательских стилей (общих для всего приложения)
     # Заголовок
-    st.markdown("""<h1 style='text-align:center;'>📝 Сервис для работы с договорами</h1>""", unsafe_allow_html=True)
+    st.markdown(f"""<h1 style='text-align:center;'>{get_icon_html('📝', 28)} Сервис для работы с договорами</h1>""", unsafe_allow_html=True)
     st.markdown("""<p style='text-align:center;color:gray;'>Создавайте дополнительные соглашения и анализируйте сделки в одном месте</p>""", unsafe_allow_html=True)
     st.markdown("---")
     # Загрузка словарей
@@ -33,11 +34,11 @@ def run_app() -> None:
     # Вкладки для генератора и дашборда
     tab_gen, tab_dash = st.tabs(["Генератор", "Дашборд"])
     with tab_gen:
-        st.subheader("📄 Генератор дополнительных соглашений")
+        st.markdown(f"### {get_icon_html('📄', 20)} Генератор дополнительных соглашений", unsafe_allow_html=True)
         st.write("Введите данные, чтобы сформировать документ. Формат полей описан в подсказках.")
         # Боковая панель со справочной информацией
         with st.sidebar:
-            st.header("ℹ️ Справка")
+            st.markdown(f"## {get_icon_html('ℹ️', 24)} Справка", unsafe_allow_html=True)
             if clients:
                 st.subheader("Компании")
                 for key in sorted(clients.keys()):
@@ -55,7 +56,7 @@ def run_app() -> None:
                 for key in sorted(neftebazy.keys()):
                     st.text(f"• {key}")
         # Форма генерации
-        st.markdown("### 📌 Основные параметры")
+        st.markdown(f"### {get_icon_html('📌', 20)} Основные параметры", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             document_type = st.radio(
@@ -71,7 +72,7 @@ def run_app() -> None:
                 value=datetime.date.today(),
                 help="Укажите плановую дату оплаты"
             )
-        st.markdown("### 🚚 Способ доставки")
+        st.markdown(f"### {get_icon_html('🚚', 20)} Способ доставки", unsafe_allow_html=True)
         delivery_method = st.radio(
             "Способ доставки",
             options=["самовывоз", "доставка", "нефтебаза"],
@@ -83,7 +84,7 @@ def run_app() -> None:
         delivery_address = None
         neftebaza_location = None
         if delivery_method == "самовывоз":
-            st.markdown("#### 📍 Выбор базиса для самовывоза")
+            st.markdown(f"#### {get_icon_html('📍', 18)} Выбор базиса для самовывоза", unsafe_allow_html=True)
             if locations:
                 pickup_location = st.selectbox(
                     "Базис",
@@ -93,7 +94,7 @@ def run_app() -> None:
             else:
                 st.error("Не найдены базисы в файле locations.json")
         elif delivery_method == "нефтебаза":
-            st.markdown("#### 🛢️ Выбор нефтебазы")
+            st.markdown(f"#### {get_icon_html('🛢️', 18)} Выбор нефтебазы", unsafe_allow_html=True)
             if neftebazy:
                 neftebaza_location = st.selectbox(
                     "Нефтебаза",
@@ -103,12 +104,12 @@ def run_app() -> None:
             else:
                 st.error("Не найдены нефтебазы в файле nb.json")
         else:
-            st.markdown("#### 🏠 Адрес доставки")
+            st.markdown(f"#### {get_icon_html('🏠', 18)} Адрес доставки", unsafe_allow_html=True)
             delivery_address = st.text_input(
                 "Адрес доставки",
                 placeholder="Например: г. Казань, ул. Абсалямова, 19"
             )
-        st.markdown("### 📝 Ввод данных")
+        st.markdown(f"### {get_icon_html('📝', 20)} Ввод данных", unsafe_allow_html=True)
         col3, col4 = st.columns(2)
         with col3:
             comp_input = st.text_input(
@@ -123,7 +124,7 @@ def run_app() -> None:
                 help="Формат: товар,количество,цена"
             )
         # Кнопка генерации
-        if st.button("📄 Сгенерировать", type="primary"):
+        if st.button("Сгенерировать", type="primary"):
             # Валидируем ввод
             if not comp_input or not prod_input:
                 st.error("Пожалуйста, заполните все поля")
@@ -165,7 +166,7 @@ def run_app() -> None:
                             st.success("Документ успешно создан!")
                             if docx_data:
                                 st.download_button(
-                                    label="⬇️ Скачать DOC",
+                                    label="Скачать DOC",
                                     data=docx_data,
                                     file_name=f"{filename_base}.doc",
                                     mime="application/msword",
