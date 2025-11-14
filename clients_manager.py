@@ -10,12 +10,27 @@ Streamlit, и сохранить результат обратно в JSON. Сп
 import json
 import streamlit as st
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Set
 from emoji_icons import get_icon_html
 
 # Путь к файлу, где хранится список клиентов. Используем относительный
 # путь, чтобы файл лежал рядом с запуском приложения.
 CLIENTS_FILE = Path("timur_clients.json")
+
+# Синонимы для автоматического сопоставления
+SYNONYMS = {
+    'м7': 'м7 софт',
+    'm7': 'м7 софт',
+    'm7 soft': 'м7 софт',
+    'м7 soft': 'м7 софт',
+    'тритон': 'тритон трейд',
+    'triton': 'тритон трейд',
+    'тритон трейд': 'тритон трейд',
+    'тритион': 'тритон трейд',
+    'транзитсити': 'тк транзит сити',
+    'трк транзит сити': 'тк транзит сити',
+    'транзит сити': 'тк транзит сити',
+}
 
 
 def load_clients() -> List[str]:
@@ -29,7 +44,7 @@ def load_clients() -> List[str]:
             with open(CLIENTS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                return data
+                return [c.lower().strip() for c in data if c.strip()]
         except Exception:
             pass
     return []
@@ -42,48 +57,106 @@ def save_clients(clients: List[str]) -> None:
         clients: список компаний в нижнем регистре.
     """
     try:
+        # Удаляем дубликаты и сортируем
+        unique_clients = sorted(list(set(c.lower().strip() for c in clients if c.strip())))
         with open(CLIENTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(clients, f, ensure_ascii=False, indent=2)
+            json.dump(unique_clients, f, ensure_ascii=False, indent=2)
     except Exception as e:
         st.error(f"Ошибка при сохранении списка компаний: {e}")
 
 
-def edit_clients() -> List[str]:
+def normalize_company_name(name: str) -> str:
+    """Нормализует название компании с учетом синонимов.
+    
+    Args:
+        name: название компании
+        
+    Returns:
+        str: нормализованное название компании
+    """
+    name_lower = name.lower().strip()
+    return SYNONYMS.get(name_lower, name_lower)
+
+
+def edit_clients(available_companies: Optional[List[str]] = None) -> List[str]:
     """Интерфейс Streamlit для редактирования списка клиентов.
-
+    
     Позволяет пользователю добавлять и удалять названия компаний,
-    закреплённых за Тимуром. Возвращает обновлённый список для
-    дальнейшего использования в фильтрации данных.
+    закреплённых за Тимуром. Если передан список доступных компаний,
+    используется удобный multiselect для выбора. Изменения сохраняются
+    автоматически.
 
+    Args:
+        available_companies: список всех доступных компаний из таблицы.
+            Если None, используется только сохраненный список.
+    
     Returns:
         List[str]: список названий компаний в нижнем регистре.
     """
     st.markdown(f"### {get_icon_html('🧾', 24)} Список компаний Тимура", unsafe_allow_html=True)
-    clients = load_clients()
-    default_text = "\n".join(clients) if clients else ""
-    # Инициализируем состояние для текстового поля, чтобы значение сохранялось между перерисовками
-    if 'clients_editor_default' not in st.session_state:
-        st.session_state['clients_editor_default'] = default_text
-    # Показываем текстовое поле с текущим состоянием
-    edited_text = st.text_area(
-        "Редактируйте список компаний (по одной в строке):",
-        value=st.session_state['clients_editor_default'],
-        height=200,
-        key="clients_editor",
-    )
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        if st.button("Сохранить изменения"):
-            new_list = [c.strip().lower() for c in edited_text.split("\n") if c.strip()]
-            save_clients(new_list)
-            # Обновляем состояние по умолчанию
-            st.session_state['clients_editor_default'] = "\n".join(new_list)
-            st.success("Список компаний обновлён!")
-    with col2:
-        if st.button("Обновить из файла"):
-            refreshed = load_clients()
-            updated_text = "\n".join(refreshed) if refreshed else ""
-            st.session_state['clients_editor_default'] = updated_text
-            st.session_state['clients_editor'] = updated_text
-            st.success("Список компаний загружен из файла")
-    return load_clients()
+    
+    # Загружаем сохраненный список
+    saved_clients = load_clients()
+    
+    # Если есть доступные компании из таблицы, используем их для выбора
+    if available_companies:
+        # Нормализуем доступные компании
+        available_normalized = [normalize_company_name(c) for c in available_companies]
+        available_unique = sorted(list(set(available_normalized)))
+        
+        # Нормализуем сохраненные компании для сопоставления
+        saved_normalized = [normalize_company_name(c) for c in saved_clients]
+        
+        # Выбираем компании из доступных, которые уже в списке Тимура
+        default_selected = [c for c in available_unique if c in saved_normalized]
+        
+        # Используем session_state для отслеживания изменений
+        # Инициализируем только если еще не инициализировано или если список доступных компаний изменился
+        state_key = 'timur_clients_selected'
+        if state_key not in st.session_state:
+            st.session_state[state_key] = default_selected
+        else:
+            # Обновляем выбранные компании, если они есть в сохраненном списке
+            current_saved = set(saved_normalized)
+            current_state = set(st.session_state[state_key])
+            # Если сохраненный список изменился, обновляем состояние
+            if current_saved != current_state:
+                # Берем пересечение сохраненных и доступных
+                st.session_state[state_key] = [c for c in available_unique if c in current_saved]
+        
+        # Мультиселект для выбора компаний
+        selected = st.multiselect(
+            "Выберите компании для мониторинга:",
+            options=available_unique,
+            default=st.session_state[state_key],
+            help="Выберите компании, за которые вы отвечаете. Изменения сохраняются автоматически."
+        )
+        
+        # Автоматически сохраняем при изменении выбора
+        current_selected_set = set(st.session_state[state_key])
+        new_selected_set = set(selected)
+        if current_selected_set != new_selected_set:
+            save_clients(selected)
+            st.session_state[state_key] = selected
+            st.success("✅ Список компаний обновлён!")
+        
+        # Показываем текущий список
+        if selected:
+            st.markdown("**Текущий список:**")
+            for company in selected:
+                st.markdown(f"• {company}")
+        else:
+            st.info("Список компаний пуст. Выберите компании из списка выше.")
+        
+        return selected
+    else:
+        # Если данных еще нет, показываем сохраненный список
+        if saved_clients:
+            st.markdown("**Сохраненный список:**")
+            for company in saved_clients:
+                st.markdown(f"• {company}")
+            st.info("Загрузите данные, чтобы увидеть полный список компаний и управлять ими.")
+        else:
+            st.info("Список компаний пуст. Загрузите данные, чтобы выбрать компании.")
+        
+        return saved_clients

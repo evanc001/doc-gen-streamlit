@@ -73,7 +73,6 @@ def display_dashboard() -> None:
             "Или загрузите Excel‑файл", type=["xlsx", "xlsm", "xls"],
         )
     filter_option = st.radio("Фильтр компаний", options=["Тимур", "Все"], index=0)
-    timur_clients = edit_clients()
 
     st.markdown("---")
     st.info("Загрузка данных из источника…")
@@ -85,19 +84,33 @@ def display_dashboard() -> None:
             df_month, df_raw, sheet_name = load_sheet_data(sheet_id=sheet_id)
         else:
             st.warning("Пожалуйста, введите ID Google Sheets или загрузите файл.")
+            # Показываем интерфейс управления компаниями даже без данных
+            if filter_option == "Тимур":
+                edit_clients(available_companies=None)
             return
         st.success(f"Загружен лист: {sheet_name}")
     except Exception as e:
         st.error(f"Ошибка загрузки данных: {e}")
+        # Показываем интерфейс управления компаниями даже при ошибке
+        if filter_option == "Тимур":
+            edit_clients(available_companies=None)
         return
+    
     # Парсим таблицы продаж и транспортных услуг
     try:
         sales_df, transport_df = parse_company_and_transport(df_raw)
     except Exception as e:
         st.error(f"Ошибка при разборе таблицы: {e}")
+        if filter_option == "Тимур":
+            edit_clients(available_companies=None)
         return
-    # Определяем список компаний для фильтрации
+    
+    # Извлекаем уникальные компании из загруженных данных
+    available_companies = sorted(sales_df['company'].unique().tolist()) if not sales_df.empty else []
+    
+    # Показываем интерфейс управления компаниями с доступными компаниями
     if filter_option == "Тимур":
+        timur_clients = edit_clients(available_companies=available_companies)
         company_filter = timur_clients
     else:
         company_filter = None
