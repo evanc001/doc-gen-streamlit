@@ -2,6 +2,7 @@
 Вспомогательный модуль для работы с иконками вместо emoji.
 """
 
+import base64
 from pathlib import Path
 
 # Базовый путь к иконкам
@@ -44,6 +45,28 @@ EMOJI_TO_ICON = {
     "🚨": "alarm.svg",
 }
 
+# Кэш для base64 закодированных SVG
+_icon_cache = {}
+
+def _load_icon_base64(icon_file: str) -> str:
+    """Загружает SVG файл и кодирует его в base64."""
+    if icon_file in _icon_cache:
+        return _icon_cache[icon_file]
+    
+    icon_path = ICONS_BASE_PATH / icon_file
+    if not icon_path.exists():
+        return None
+    
+    try:
+        with open(icon_path, "rb") as f:
+            svg_content = f.read()
+            base64_content = base64.b64encode(svg_content).decode("utf-8")
+            data_uri = f"data:image/svg+xml;base64,{base64_content}"
+            _icon_cache[icon_file] = data_uri
+            return data_uri
+    except Exception:
+        return None
+
 def get_icon_path(emoji: str) -> str:
     """Возвращает путь к иконке для данного emoji."""
     icon_file = EMOJI_TO_ICON.get(emoji)
@@ -52,15 +75,19 @@ def get_icon_path(emoji: str) -> str:
     return None
 
 def get_icon_html(emoji: str, size: int = 16, alt: str = None) -> str:
-    """Возвращает HTML тег <img> для emoji."""
-    icon_path = get_icon_path(emoji)
-    if not icon_path:
+    """Возвращает HTML тег <img> для emoji с base64 кодированием."""
+    icon_file = EMOJI_TO_ICON.get(emoji)
+    if not icon_file:
         return emoji  # Fallback на emoji, если иконка не найдена
+    
+    data_uri = _load_icon_base64(icon_file)
+    if not data_uri:
+        return emoji  # Fallback на emoji, если не удалось загрузить
     
     if alt is None:
         alt = f"emoji: {emoji}"
     
-    return f'<img src="{icon_path}" alt="{alt}" width="{size}" height="{size}" style="vertical-align: middle; display: inline-block;">'
+    return f'<img src="{data_uri}" alt="{alt}" width="{size}" height="{size}" style="vertical-align: middle; display: inline-block;">'
 
 def get_icon_markdown(emoji: str, alt: str = None) -> str:
     """Возвращает Markdown изображение для emoji."""
