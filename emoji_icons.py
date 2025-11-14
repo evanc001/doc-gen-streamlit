@@ -74,7 +74,7 @@ def get_icon_path(emoji: str) -> str:
         return str(ICONS_BASE_PATH / icon_file)
     return None
 
-def get_icon_html(emoji: str, size: int = 16, alt: str = None) -> str:
+def get_icon_html(emoji: str, size: int = 20, alt: str = None) -> str:
     """Возвращает HTML тег <img> для emoji с base64 кодированием."""
     icon_file = EMOJI_TO_ICON.get(emoji)
     if not icon_file:
@@ -87,7 +87,11 @@ def get_icon_html(emoji: str, size: int = 16, alt: str = None) -> str:
     if alt is None:
         alt = f"emoji: {emoji}"
     
-    return f'<img src="{data_uri}" alt="{alt}" width="{size}" height="{size}" style="vertical-align: middle; display: inline-block;">'
+    # Увеличиваем размер для лучшей видимости
+    # Минимальный размер 20px (соответствует шрифту ~14px)
+    actual_size = max(size, 20)
+    
+    return f'<img src="{data_uri}" alt="{alt}" width="{actual_size}" height="{actual_size}" style="vertical-align: middle; display: inline-block; margin-right: 4px; object-fit: contain; image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;">'
 
 def get_icon_markdown(emoji: str, alt: str = None) -> str:
     """Возвращает Markdown изображение для emoji."""

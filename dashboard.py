@@ -48,12 +48,12 @@ SYNONYMS: Dict[str, str] = {
 def display_dashboard() -> None:
     """Отображает пользовательский интерфейс дашборда."""
     st.set_page_config(page_title="Дашборд по продажам", layout="wide")
-    st.markdown(f"# {get_icon_html('📊', 24)} Дашборд по продажам топлива", unsafe_allow_html=True)
+    st.markdown(f"# {get_icon_html('📊', 32)} Дашборд по продажам топлива", unsafe_allow_html=True)
 
     # Блок настроек: теперь размещаем поля в основном интерфейсе, чтобы они
     # были видимы даже при свернутой боковой панели. Можно использовать
     # columns для компактного размещения.
-    st.markdown(f"### {get_icon_html('⚙️', 20)} Настройки", unsafe_allow_html=True)
+    st.markdown(f"### {get_icon_html('⚙️', 24)} Настройки", unsafe_allow_html=True)
     try:
         sheet_id_default = str(st.secrets.get("default_sheet_id", ""))
     except Exception:
@@ -125,7 +125,7 @@ def display_dashboard() -> None:
     c4.metric("Чистая прибыль", f"{total_net_profit:,.0f}".replace(",", " "))
 
     st.markdown("---")
-    st.markdown(f"### {get_icon_html('📦', 20)} Сводные показатели по компаниям", unsafe_allow_html=True)
+    st.markdown(f"### {get_icon_html('📦', 24)} Сводные показатели по компаниям", unsafe_allow_html=True)
     if not summary_df.empty:
         # Переименовываем для отображения
         display_df = summary_df.rename(columns={
@@ -141,7 +141,7 @@ def display_dashboard() -> None:
     else:
         st.info("Нет данных для выбранного фильтра.")
 
-    st.markdown(f"### {get_icon_html('💸', 20)} Задолженность / Переплата", unsafe_allow_html=True)
+    st.markdown(f"### {get_icon_html('💸', 24)} Задолженность / Переплата", unsafe_allow_html=True)
     if not debt_table.empty:
         debt_df = debt_table.copy()
         debt_df = debt_df.rename(columns={'company': 'Компания', 'debt': 'Сумма'})
@@ -162,7 +162,7 @@ def display_dashboard() -> None:
         st.info("Нет информации о задолженности или переплате.")
 
 
-    st.markdown(f"### {get_icon_html('🚫', 20)} Строки без указания водителя", unsafe_allow_html=True)
+    st.markdown(f"### {get_icon_html('🚫', 24)} Строки без указания водителя", unsafe_allow_html=True)
     if not missing_driver_df.empty:
         miss_df = missing_driver_df[['company', 'tonnage', 'profit', 'row_number']].rename(columns={
             'company': 'Компания',
@@ -176,7 +176,7 @@ def display_dashboard() -> None:
         st.info("Все строки содержат информацию о водителе.")
 
     st.markdown("---")
-    st.markdown(f"<small>{get_icon_html('🔄', 16)} Данные обновляются напрямую из Google Sheets или загруженного файла.</small>", unsafe_allow_html=True)
+    st.markdown(f"<small>{get_icon_html('🔄', 20)} Данные обновляются напрямую из Google Sheets или загруженного файла.</small>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
