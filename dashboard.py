@@ -101,6 +101,12 @@ def display_dashboard() -> None:
         sales_df, transport_df = parse_company_and_transport(df_raw)
     except Exception as e:
         st.error(f"Ошибка при разборе таблицы: {e}")
+        # Показываем отладочную информацию
+        with st.expander("🔍 Отладочная информация (нажмите для просмотра)"):
+            st.write(f"Размер сырой таблицы: {df_raw.shape}")
+            st.write(f"Первые 10 строк колонки A (названия компаний):")
+            if len(df_raw) > 0:
+                st.dataframe(df_raw.iloc[:10, 0] if df_raw.shape[1] > 0 else pd.DataFrame(), use_container_width=True)
         if filter_option == "Тимур":
             edit_clients(available_companies=None)
         return
@@ -108,6 +114,34 @@ def display_dashboard() -> None:
     # Проверяем, что данные успешно распарсены
     if sales_df.empty:
         st.warning("Не найдено данных о продажах в таблице. Проверьте формат данных.")
+        # Показываем отладочную информацию
+        with st.expander("🔍 Отладочная информация (нажмите для просмотра)"):
+            st.write(f"Размер сырой таблицы: {df_raw.shape}")
+            st.write(f"Найдено строк с 'ТРАНСПОРТ +': {len(df_raw[df_raw.iloc[:, 0].astype(str).str.contains('ТРАНСПОРТ', case=False, na=False)])}")
+            st.write("Первые 20 строк колонки A (названия компаний):")
+            if len(df_raw) > 0:
+                preview_df = df_raw.iloc[:20, :min(5, df_raw.shape[1])].copy()
+                preview_df.columns = [f"Колонка {i}" for i in range(preview_df.shape[1])]
+                st.dataframe(preview_df, use_container_width=True)
+            st.write("Проверка: ищем строки с данными в колонках B и F...")
+            # Показываем примеры строк
+            if len(df_raw) > 2:
+                sample_rows = []
+                for i in range(2, min(15, len(df_raw))):
+                    row = df_raw.iloc[i]
+                    if len(row) > 0:
+                        col_a = str(row.iloc[0]) if 0 < len(row) else ""
+                        col_b = str(row.iloc[1]) if 1 < len(row) else ""
+                        col_f = str(row.iloc[5]) if 5 < len(row) else ""
+                        if col_a.strip():
+                            sample_rows.append({
+                                'Строка': i + 1,
+                                'A (компания)': col_a[:50],
+                                'B': col_b[:30],
+                                'F': col_f[:30]
+                            })
+                if sample_rows:
+                    st.dataframe(pd.DataFrame(sample_rows), use_container_width=True)
         if filter_option == "Тимур":
             edit_clients(available_companies=None)
         return

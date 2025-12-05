@@ -452,21 +452,22 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
         if not a_clean:
             # Если название компании не указано, пропускаем строку
             continue
-        # Проверяем наличие данных в обязательных столбцах B, F, G. Если во всех
-        # трёх столбцах пусто или NaN, это агрегированная строка (например,
-        # сводная сумма) — такие строки исключаются из расчётов. Для проверки
-        # используем индексы idx_B, idx_F, idx_G.
+        # Проверяем наличие данных в обязательных столбцах B, F для фильтрации служебных строк.
+        # Если оба столбца пустые, это может быть агрегированная строка (например,
+        # сводная сумма) — такие строки исключаются из расчётов.
         def _cell_empty(val: Any) -> bool:
-            return (val is None) or (isinstance(val, float) and pd.isna(val)) or (str(val).strip() == '')
+            if val is None:
+                return True
+            if isinstance(val, float) and pd.isna(val):
+                return True
+            if str(val).strip() == '':
+                return True
+            return False
+        
         val_B = row.iloc[idx_B] if idx_B < len(row) else None
         val_F = row.iloc[idx_F] if idx_F < len(row) else None
-        val_G = row.iloc[idx_G] if idx_G < len(row) else None
-        # Исключаем строки, где в любом из ключевых столбцов (B, F, G) нет данных.
-        # Если хотя бы один из этих столбцов пустой, строка относится к поставщику
-        # или служебной сумме и не должна участвовать в расчётах по клиентам.
-        if _cell_empty(val_B) or _cell_empty(val_F):
-            continue
-        # Преобразуем числовые значения
+        
+        # Преобразуем числовые значения (определяем функцию перед использованием)
         def parse_float(val: Any) -> Optional[float]:
             try:
                 s = str(val).strip()
@@ -475,11 +476,25 @@ def parse_company_and_transport(df_raw: pd.DataFrame) -> Tuple[pd.DataFrame, pd.
                 return float(s.replace(' ', '').replace(',', '.'))
             except Exception:
                 return None
+        
+        # Проверяем, есть ли хотя бы одно числовое значение (тоннаж или прибыль)
+        # для определения, что это реальная строка с данными
+        tonnage_val = parse_float(row.iloc[idx_tonnage]) if idx_tonnage < len(row) else None
+        profit_val = parse_float(row.iloc[idx_profit]) if idx_profit < len(row) else None
+        
+        # Исключаем строки только если:
+        # 1. Оба столбца B и F пустые И
+        # 2. Нет ни тоннажа, ни прибыли
+        # Это означает, что строка служебная или агрегированная
+        if _cell_empty(val_B) and _cell_empty(val_F) and tonnage_val is None and profit_val is None:
+            continue
+        
+        # Используем уже вычисленные значения для оптимизации
         sales_rows.append(
             {
                 'company': a_clean,
-                'tonnage': parse_float(row.iloc[idx_tonnage]) if idx_tonnage < len(row) else None,
-                'profit': parse_float(row.iloc[idx_profit]) if idx_profit < len(row) else None,
+                'tonnage': tonnage_val,  # Уже вычислено выше
+                'profit': profit_val,  # Уже вычислено выше
                 'price_per_ton': parse_float(row.iloc[idx_price_per_ton]) if idx_price_per_ton < len(row) else None,
                 'paid': parse_float(row.iloc[idx_paid]) if idx_paid < len(row) else None,
                 'driver_info': str(row.iloc[idx_driver_info]).strip() if idx_driver_info < len(row) and str(row.iloc[idx_driver_info]).strip() != '' else None,
